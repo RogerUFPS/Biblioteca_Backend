@@ -1,1 +1,19 @@
-SECRET_KEY = 'django-insecure-zle*tbvjmdfk4q&-5a*3tp!a%k)p5kc@0yb&7h-s9a6$oy7br2'
+import os
+from dotenv import load_dotenv
+from urllib.parse import urlparse, parse_qsl
+
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("DATABASE_NAME"),
+        "USER": os.getenv("DATABASE_USER"),
+        "PASSWORD": os.getenv("DATABASE_PASSWORD"),
+        "HOST": os.getenv("DATABASE_HOST", "db"),
+        "PORT": os.getenv("DATABASE_PORT", "5432"),
+        "OPTIONS": {"sslmode": "require"},
+    }
+}
