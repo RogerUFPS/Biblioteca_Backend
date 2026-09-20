@@ -27,6 +27,16 @@ class PhaseATests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["created_by"], self.system.pk)
 
+    def test_catalog_names_are_normalized_to_lowercase(self):
+        response = self.client.post(
+            "/api/catalog/knowledge-areas/",
+            {"name": "  Ingeniería de Datos  "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["name"], "ingeniería de datos")
+
     def test_catalog_update_sets_updated_fields(self):
         language = Language.objects.create(
             abbreviation="es",
@@ -67,7 +77,7 @@ class PhaseATests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(Editorial.objects.filter(pk=editorial.pk).exists())
 
-    def test_archived_unique_value_returns_bad_request(self):
+    def test_archived_unique_value_is_restored_automatically(self):
         editorial = Editorial.objects.create(
             name="Editorial archivada",
             created_by=self.system,
@@ -80,7 +90,10 @@ class PhaseATests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["id"], editorial.pk)
+        self.assertIsNone(response.data["deleted_at"])
+        self.assertTrue(Editorial.objects.filter(pk=editorial.pk).exists())
 
     def test_delete_without_explanation_returns_bad_request(self):
         editorial = Editorial.objects.create(

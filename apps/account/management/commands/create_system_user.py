@@ -24,8 +24,6 @@ class Command(BaseCommand):
             code=SYSTEM_CODE,
             full_name="Sistema",
             email="sistema@local.dev",
-            is_staff=True,
-            is_superuser=True,
         )
         user.set_unusable_password()
         user.save()

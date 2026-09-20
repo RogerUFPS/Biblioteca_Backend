@@ -22,29 +22,43 @@ class ArchivedNameMixin:
     archived_unique_fields = ()
 
     def validate(self, attrs):
+        for field in self.archived_unique_fields:
+            if field == "name" and field in attrs and isinstance(attrs[field], str):
+                attrs[field] = attrs[field].strip().lower()
         attrs = super().validate(attrs)
-        model = self.Meta.model
+        self._archived_instance = None
         filters = {
             field: attrs[field]
             for field in self.archived_unique_fields
             if field in attrs
         }
         if filters:
-            archived = model.all_objects.filter(
+            self._archived_instance = self.Meta.model.all_objects.filter(
                 deleted_at__isnull=False,
                 **filters,
             ).first()
-            if archived:
-                raise serializers.ValidationError(
-                    {
-                        field: (
-                            "Este valor pertenece a un registro eliminado. "
-                            f"Restaura el registro con id {archived.pk}."
-                        )
-                        for field in filters
-                    }
-                )
         return attrs
+
+    def create(self, validated_data):
+        archived = getattr(self, "_archived_instance", None)
+        if archived is None:
+            return super().create(validated_data)
+
+        acting_user = validated_data.pop("created_by", None)
+        for field, value in validated_data.items():
+            setattr(archived, field, value)
+        archived.restore()
+        archived.updated_by = acting_user
+        archived.updated_at = timezone.now()
+        archived.save(update_fields=[
+            *validated_data.keys(),
+            "deleted_by",
+            "deleted_at",
+            "delete_explanation",
+            "updated_by",
+            "updated_at",
+        ])
+        return archived
 
 
 class AuditableViewSet(viewsets.ModelViewSet):

@@ -18,17 +18,17 @@ class Command(BaseCommand):
     def handle(self, *_args, **_options):
         user = User.all_objects.get(code=0)
         records = (
-            (Language, {"abbreviation": "es", "name": "Español"}),
-            (Language, {"abbreviation": "en", "name": "Inglés"}),
-            (Country, {"name": "Colombia", "abbreviation": "CO", "emoji_flag": "🇨🇴"}),
-            (Country, {"name": "México", "abbreviation": "MX", "emoji_flag": "🇲🇽"}),
-            (MaterialType, {"name": "Artículo"}),
-            (MaterialType, {"name": "Libro"}),
-            (Institution, {"name": "Universidad Francisco de Paula Santander"}),
-            (Editorial, {"name": "Editorial Académica"}),
-            (KnowledgeArea, {"name": "Ciencias de la computación"}),
-            (KnowledgeArea, {"name": "Ingeniería"}),
-            (AcademicProgram, {"name": "Ingeniería de Sistemas"}),
+            (Language, {"abbreviation": "es", "name": "español"}),
+            (Language, {"abbreviation": "en", "name": "inglés"}),
+            (Country, {"name": "colombia", "abbreviation": "CO", "emoji_flag": "🇨🇴"}),
+            (Country, {"name": "méxico", "abbreviation": "MX", "emoji_flag": "🇲🇽"}),
+            (MaterialType, {"name": "artículo"}),
+            (MaterialType, {"name": "libro"}),
+            (Institution, {"name": "universidad francisco de paula santander"}),
+            (Editorial, {"name": "editorial académica"}),
+            (KnowledgeArea, {"name": "ciencias de la computación"}),
+            (KnowledgeArea, {"name": "ingeniería"}),
+            (AcademicProgram, {"name": "ingeniería de sistemas"}),
         )
 
         created_count = 0

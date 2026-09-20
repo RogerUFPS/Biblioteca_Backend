@@ -80,5 +80,10 @@ class AuditableModel(SoftDeleteMixin):
     objects = AliveManager()
     all_objects = models.Manager()
 
+    def save(self, *args, **kwargs):
+        if hasattr(self, "name") and isinstance(self.name, str):
+            self.name = self.name.strip().lower()
+        return super().save(*args, **kwargs)
+
     class Meta:
         abstract = True

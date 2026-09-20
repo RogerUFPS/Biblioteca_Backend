@@ -10,14 +10,9 @@ La autenticación JWT y los permisos pertenecen a la Fase B.
 - Git.
 - Un archivo `.env` en la raíz del proyecto.
 
-Si todavía no tienes `.env`, copia `.env.example` y completa los datos de la
-base de datos:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-El archivo `.env` real no debe subirse a Git porque contiene credenciales.
+Debes crear un archivo `.env` en la raíz del proyecto y completar los datos de
+la base de datos. El archivo `.env` real no debe subirse a Git porque contiene
+credenciales.
 
 ## 2. Preparar y levantar el proyecto
 
@@ -76,6 +71,11 @@ Los campos de auditoría son siempre de solo lectura:
 id, created_by, created_at, updated_by, updated_at,
 deleted_by, deleted_at, delete_explanation
 ```
+
+Los valores enviados en el campo `name` se guardan normalizados en minúsculas
+y sin espacios al inicio o al final. Esto permite comparar nombres de forma
+consistente. Si el nombre coincide con un registro eliminado, la API restaura
+automáticamente ese registro en lugar de crear un duplicado.
 
 ## 5. Operaciones generales
 
