@@ -20,7 +20,36 @@ class AliveManager(models.Manager):
         return SoftDeleteQuerySet(self.model, using=self._db).alive()
 
 
-class AuditableModel(models.Model):
+class SoftDeleteMixin(models.Model):
+    """Campos y operaciones comunes para el borrado lógico."""
+
+    delete_explanation = models.CharField(max_length=500, null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
+
+    def soft_delete(self, user, explanation: str):
+        if not explanation or not explanation.strip():
+            raise ValueError("Se requiere una explicación para eliminar.")
+
+        self.deleted_by = user
+        self.deleted_at = timezone.now()
+        self.delete_explanation = explanation.strip()
+        self.save(update_fields=["deleted_by", "deleted_at", "delete_explanation"])
+
+    def restore(self):
+        self.deleted_by = None
+        self.deleted_at = None
+        self.delete_explanation = None
+        self.save(update_fields=["deleted_by", "deleted_at", "delete_explanation"])
+
+
+class AuditableModel(SoftDeleteMixin):
     """Modelo abstracto con auditoría y borrado lógico reutilizables."""
 
     created_by = models.ForeignKey(
@@ -39,7 +68,6 @@ class AuditableModel(models.Model):
     )
     updated_at = models.DateTimeField(null=True, blank=True)
 
-    delete_explanation = models.CharField(max_length=500, null=True, blank=True)
     deleted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -54,24 +82,3 @@ class AuditableModel(models.Model):
 
     class Meta:
         abstract = True
-
-    @property
-    def is_deleted(self) -> bool:
-        return self.deleted_at is not None
-
-    def soft_delete(self, user, explanation: str):
-        """Marca el registro como eliminado y exige una explicación."""
-        if not explanation or not explanation.strip():
-            raise ValueError("Se requiere una explicación para eliminar.")
-
-        self.deleted_by = user
-        self.deleted_at = timezone.now()
-        self.delete_explanation = explanation.strip()
-        self.save(update_fields=["deleted_by", "deleted_at", "delete_explanation"])
-
-    def restore(self):
-        """Restaura un registro eliminado lógicamente."""
-        self.deleted_by = None
-        self.deleted_at = None
-        self.delete_explanation = None
-        self.save(update_fields=["deleted_by", "deleted_at", "delete_explanation"])
