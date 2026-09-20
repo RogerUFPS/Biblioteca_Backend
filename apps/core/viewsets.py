@@ -21,6 +21,12 @@ class DeleteSerializer(serializers.Serializer):
 class ArchivedNameMixin:
     archived_unique_fields = ()
 
+    def to_internal_value(self, data):
+        data = data.copy()
+        if "name" in self.archived_unique_fields and isinstance(data.get("name"), str):
+            data["name"] = data["name"].strip().lower()
+        return super().to_internal_value(data)
+
     def validate(self, attrs):
         for field in self.archived_unique_fields:
             if field == "name" and field in attrs and isinstance(attrs[field], str):

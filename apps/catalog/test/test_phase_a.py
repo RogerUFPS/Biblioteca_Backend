@@ -2,7 +2,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.account.models import User
-from apps.catalog.models import Editorial, Language
+from apps.catalog.models import Country, Editorial, Language
 
 
 class PhaseATests(TestCase):
@@ -36,6 +36,27 @@ class PhaseATests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["name"], "ingeniería de datos")
+
+    def test_catalog_name_is_case_insensitive_for_uniqueness(self):
+        Country.objects.create(
+            name="colombia",
+            abbreviation="co",
+            emoji_flag="🇨🇴",
+            created_by=self.system,
+        )
+
+        response = self.client.post(
+            "/api/catalog/countries/",
+            {
+                "name": "Colombia",
+                "abbreviation": "co-2",
+                "emoji_flag": "🇨🇴",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("name", response.data)
 
     def test_catalog_update_sets_updated_fields(self):
         language = Language.objects.create(
