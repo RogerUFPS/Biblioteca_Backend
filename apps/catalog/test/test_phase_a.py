@@ -1,3 +1,4 @@
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -58,6 +59,23 @@ class PhaseATests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("name", response.data)
+
+    def test_database_constraint_rejects_case_insensitive_duplicate(self):
+        Country.objects.create(
+            name="colombia",
+            abbreviation="co",
+            emoji_flag="🇨🇴",
+            created_by=self.system,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Country.objects.create(
+                    name="COLOMBIA",
+                    abbreviation="co-2",
+                    emoji_flag="🇨🇴",
+                    created_by=self.system,
+                )
 
     def test_catalog_update_sets_updated_fields(self):
         language = Language.objects.create(
