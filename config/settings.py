@@ -62,23 +62,31 @@ TEMPLATES = [
 WSGI_APPLICATION = "project.wsgi.application"
 ASGI_APPLICATION = "project.asgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("POSTGRES_DB", os.getenv("DATABASE_NAME")),
-        "USER": os.getenv("POSTGRES_USER", os.getenv("DATABASE_USER")),
-        "PASSWORD": os.getenv("POSTGRES_PASSWORD", os.getenv("DATABASE_PASSWORD")),
-        "HOST": os.getenv(
-            "POSTGRES_HOST",
-            os.getenv("DATABASE_HOST", "db"),
-        ),
-        "PORT": os.getenv(
-            "POSTGRES_PORT",
-            os.getenv("DATABASE_PORT", "5432"),
-        ),
-        "OPTIONS": {"sslmode": "require"},
+if os.getenv("DJANGO_TESTING", "").lower() in {"1", "true", "yes", "on"}:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "test.sqlite3",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("POSTGRES_DB", os.getenv("DATABASE_NAME")),
+            "USER": os.getenv("POSTGRES_USER", os.getenv("DATABASE_USER")),
+            "PASSWORD": os.getenv("POSTGRES_PASSWORD", os.getenv("DATABASE_PASSWORD")),
+            "HOST": os.getenv(
+                "POSTGRES_HOST",
+                os.getenv("DATABASE_HOST", "db"),
+            ),
+            "PORT": os.getenv(
+                "POSTGRES_PORT",
+                os.getenv("DATABASE_PORT", "5432"),
+            ),
+            "OPTIONS": {"sslmode": "require"},
+        }
+    }
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
