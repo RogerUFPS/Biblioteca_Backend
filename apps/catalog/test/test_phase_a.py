@@ -38,12 +38,13 @@ class PhaseATests(TestCase):
         self.assertEqual(response.data["name"], "ingeniería de datos")
 
     def test_catalog_name_is_case_insensitive_for_uniqueness(self):
-        Country.objects.create(
+        country = Country.objects.create(
             name="colombia",
             abbreviation="co",
             emoji_flag="🇨🇴",
             created_by=self.system,
         )
+        Country.all_objects.filter(pk=country.pk).update(name="Colombia")
 
         response = self.client.post(
             "/api/catalog/countries/",

@@ -39,9 +39,27 @@ class ArchivedNameMixin:
             if field in attrs
         }
         if filters:
+            active_duplicates = {
+                field: self.Meta.model.all_objects.filter(
+                    deleted_at__isnull=True,
+                    **{f"{field}__iexact": value},
+                ).exclude(pk=getattr(self.instance, "pk", None)).exists()
+                for field, value in filters.items()
+            }
+            if any(active_duplicates.values()):
+                raise serializers.ValidationError(
+                    {
+                        field: "Ya existe un registro activo con este valor."
+                        for field, duplicate in active_duplicates.items()
+                        if duplicate
+                    }
+                )
             self._archived_instance = self.Meta.model.all_objects.filter(
                 deleted_at__isnull=False,
-                **filters,
+                **{
+                    f"{field}__iexact": value
+                    for field, value in filters.items()
+                },
             ).first()
         return attrs
 
