@@ -86,6 +86,17 @@ class ArchivedNameMixin:
 
 
 class AuditableViewSet(viewsets.ModelViewSet):
+    @action(detail=False, methods=["get"], url_path="archived")
+    def archived(self, request):
+        queryset = self.queryset.model.all_objects.filter(deleted_at__isnull=False)
+        queryset = self.filter_queryset(queryset)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
     def perform_create(self, serializer):
         serializer.save(created_by=get_acting_user(self.request))
 

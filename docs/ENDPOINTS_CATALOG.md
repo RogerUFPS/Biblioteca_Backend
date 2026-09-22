@@ -86,6 +86,7 @@ Para cada recurso, `{recurso}` representa una ruta base de la tabla anterior.
 | GET | `/api/catalog/{recurso}/` | Listar registros activos | 200 |
 | POST | `/api/catalog/{recurso}/` | Crear un registro | 201 |
 | GET | `/api/catalog/{recurso}/{id}/` | Consultar un registro | 200 |
+| GET | `/api/catalog/{recurso}/archived/` | Listar registros eliminados | 200 |
 | PUT | `/api/catalog/{recurso}/{id}/` | Reemplazar un registro | 200 |
 | PATCH | `/api/catalog/{recurso}/{id}/` | Actualizar parcialmente | 200 |
 | DELETE | `/api/catalog/{recurso}/{id}/` | Borrado lógico | 204 |
@@ -93,6 +94,20 @@ Para cada recurso, `{recurso}` representa una ruta base de la tabla anterior.
 
 Los listados no muestran registros eliminados. Un `GET` sobre un registro
 eliminado responde 404.
+
+Para listar únicamente los registros eliminados, utiliza el endpoint
+`/archived/`. Por ejemplo:
+
+```text
+GET /api/catalog/editorials/archived/
+```
+
+Este endpoint conserva la paginación y muestra los campos de auditoría del
+borrado. La restauración continúa realizándose con:
+
+```text
+POST /api/catalog/editorials/{id}/restore/
+```
 
 ## 6. Ejemplos con `curl`
 

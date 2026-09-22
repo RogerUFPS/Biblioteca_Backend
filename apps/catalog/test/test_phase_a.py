@@ -117,6 +117,24 @@ class PhaseATests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(Editorial.objects.filter(pk=editorial.pk).exists())
 
+    def test_archived_endpoint_lists_deleted_records_only(self):
+        archived = Editorial.objects.create(
+            name="Editorial archivada para listar",
+            created_by=self.system,
+        )
+        archived.soft_delete(self.system, "Prueba de archivados")
+        Editorial.objects.create(
+            name="Editorial activa para listar",
+            created_by=self.system,
+        )
+
+        response = self.client.get("/api/catalog/editorials/archived/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], archived.pk)
+        self.assertIsNotNone(response.data["results"][0]["deleted_at"])
+
     def test_archived_unique_value_is_restored_automatically(self):
         editorial = Editorial.objects.create(
             name="Editorial archivada",
