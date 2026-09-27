@@ -3,7 +3,14 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.account.models import User
-from apps.catalog.models import Country, Editorial, Language
+from apps.catalog.models import (
+    AcademicProgram,
+    Country,
+    Editorial,
+    KnowledgeArea,
+    Language,
+    SharedAcademicProgramKnowledgeArea,
+)
 
 
 class PhaseATests(TestCase):
@@ -96,26 +103,70 @@ class PhaseATests(TestCase):
         self.assertIsNotNone(language.updated_at)
 
     def test_delete_requires_explanation_and_restore_works(self):
+        area = KnowledgeArea.objects.create(
+            name="Área de prueba",
+            created_by=self.system,
+        )
+        program = AcademicProgram.objects.create(
+            name="Programa de prueba",
+            created_by=self.system,
+        )
+        relation = SharedAcademicProgramKnowledgeArea.objects.create(
+            knowledge_area=area,
+            academic_program=program,
+            created_by=self.system,
+        )
+
+        response = self.client.delete(
+            f"/api/catalog/knowledge-areas/{area.pk}/",
+            {"delete_explanation": "Registro de prueba"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["permanent"])
+        self.assertFalse(KnowledgeArea.objects.filter(pk=area.pk).exists())
+        self.assertTrue(KnowledgeArea.all_objects.filter(pk=area.pk).exists())
+
+        response = self.client.post(
+            f"/api/catalog/knowledge-areas/{area.pk}/restore/",
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(KnowledgeArea.objects.filter(pk=area.pk).exists())
+        relation.refresh_from_db()
+
+    def test_delete_without_relations_is_permanent(self):
         editorial = Editorial.objects.create(
-            name="Editorial de prueba",
+            name="Editorial permanente",
             created_by=self.system,
         )
 
         response = self.client.delete(
             f"/api/catalog/editorials/{editorial.pk}/",
-            {"delete_explanation": "Registro de prueba"},
+            {"delete_explanation": "Limpieza de prueba"},
             format="json",
         )
-        self.assertEqual(response.status_code, 204)
-        self.assertFalse(Editorial.objects.filter(pk=editorial.pk).exists())
-        self.assertTrue(Editorial.all_objects.filter(pk=editorial.pk).exists())
 
-        response = self.client.post(
-            f"/api/catalog/editorials/{editorial.pk}/restore/",
-            format="json",
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Editorial.all_objects.filter(pk=editorial.pk).exists())
+
+    def test_archived_endpoint_lists_deleted_records_only(self):
+        archived = Editorial.objects.create(
+            name="Editorial archivada para listar",
+            created_by=self.system,
         )
+        archived.soft_delete(self.system, "Prueba de archivados")
+        Editorial.objects.create(
+            name="Editorial activa para listar",
+            created_by=self.system,
+        )
+
+        response = self.client.get("/api/catalog/editorials/archived/")
+
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(Editorial.objects.filter(pk=editorial.pk).exists())
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], archived.pk)
+        self.assertIsNotNone(response.data["results"][0]["deleted_at"])
 
     def test_archived_unique_value_is_restored_automatically(self):
         editorial = Editorial.objects.create(

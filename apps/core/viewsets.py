@@ -1,3 +1,5 @@
+from django.db import IntegrityError
+from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -86,6 +88,31 @@ class ArchivedNameMixin:
 
 
 class AuditableViewSet(viewsets.ModelViewSet):
+    def _has_business_relations(self, instance):
+        from django.contrib.auth import get_user_model
+
+        user_model = get_user_model()
+        for relation in instance._meta.related_objects:
+            if relation.related_model is user_model:
+                continue
+            related_queryset = relation.related_model._base_manager.filter(
+                **{relation.field.name: instance}
+            )
+            if related_queryset.exists():
+                return True
+        return False
+
+    @action(detail=False, methods=["get"], url_path="archived")
+    def archived(self, request):
+        queryset = self.queryset.model.all_objects.filter(deleted_at__isnull=False)
+        queryset = self.filter_queryset(queryset)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
     def perform_create(self, serializer):
         serializer.save(created_by=get_acting_user(self.request))
 
@@ -99,14 +126,31 @@ class AuditableViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         body = DeleteSerializer(data=request.data)
         body.is_valid(raise_exception=True)
+        acting_user = get_acting_user(request)
+        explanation = body.validated_data["delete_explanation"]
+        if not self._has_business_relations(instance):
+            try:
+                instance.delete()
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            except (IntegrityError, ProtectedError):
+                pass
         try:
             instance.soft_delete(
-                user=get_acting_user(request),
-                explanation=body.validated_data["delete_explanation"],
+                user=acting_user,
+                explanation=explanation,
             )
         except ValueError as error:
             return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            {
+                "detail": (
+                    "El registro fue desactivado mediante borrado lógico porque "
+                    "otros elementos dependen de él."
+                ),
+                "permanent": False,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="restore")
     def restore(self, request, pk=None):
