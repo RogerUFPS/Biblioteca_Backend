@@ -124,11 +124,17 @@ class AuditableViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        body = DeleteSerializer(data=request.data)
-        body.is_valid(raise_exception=True)
+        has_business_relations = self._has_business_relations(instance)
+        if has_business_relations:
+            body = DeleteSerializer(data=request.data)
+            body.is_valid(raise_exception=True)
         acting_user = get_acting_user(request)
-        explanation = body.validated_data["delete_explanation"]
-        if not self._has_business_relations(instance):
+        explanation = (
+            body.validated_data["delete_explanation"]
+            if has_business_relations
+            else None
+        )
+        if not has_business_relations:
             try:
                 instance.delete()
                 return Response(status=status.HTTP_204_NO_CONTENT)

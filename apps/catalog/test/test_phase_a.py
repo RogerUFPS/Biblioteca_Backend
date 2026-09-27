@@ -102,6 +102,69 @@ class PhaseATests(TestCase):
         self.assertEqual(language.updated_by, self.system)
         self.assertIsNotNone(language.updated_at)
 
+    def test_academic_program_requires_and_creates_knowledge_areas(self):
+        response = self.client.post(
+            "/api/catalog/academic-programs/",
+            {"name": "Programa sin áreas"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("knowledge_areas", response.data)
+
+        area = KnowledgeArea.objects.create(
+            name="Área del programa",
+            created_by=self.system,
+        )
+        response = self.client.post(
+            "/api/catalog/academic-programs/",
+            {
+                "name": "Programa con áreas",
+                "knowledge_areas": [area.pk],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        program = AcademicProgram.objects.get(pk=response.data["id"])
+        self.assertEqual(response.data["knowledge_areas"], [area.pk])
+        self.assertTrue(
+            SharedAcademicProgramKnowledgeArea.objects.filter(
+                academic_program=program,
+                knowledge_area=area,
+            ).exists()
+        )
+
+    def test_relation_queries_are_available_from_both_entities(self):
+        area = KnowledgeArea.objects.create(
+            name="Área consultable",
+            created_by=self.system,
+        )
+        program = AcademicProgram.objects.create(
+            name="Programa consultable",
+            created_by=self.system,
+        )
+        SharedAcademicProgramKnowledgeArea.objects.create(
+            knowledge_area=area,
+            academic_program=program,
+            created_by=self.system,
+        )
+
+        response = self.client.get(
+            f"/api/catalog/academic-programs/{program.pk}/knowledge-areas/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"][0]["id"], area.pk)
+
+        response = self.client.get(
+            f"/api/catalog/knowledge-areas/{area.pk}/academic-programs/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"][0]["id"], program.pk)
+
+        response = self.client.get(
+            "/api/catalog/academic-program-knowledge-areas/"
+        )
+        self.assertEqual(response.status_code, 404)
+
     def test_delete_requires_explanation_and_restore_works(self):
         area = KnowledgeArea.objects.create(
             name="Área de prueba",
@@ -186,7 +249,7 @@ class PhaseATests(TestCase):
         self.assertIsNone(response.data["deleted_at"])
         self.assertTrue(Editorial.objects.filter(pk=editorial.pk).exists())
 
-    def test_delete_without_explanation_returns_bad_request(self):
+    def test_delete_without_explanation_is_permanent_without_relations(self):
         editorial = Editorial.objects.create(
             name="Editorial sin explicación",
             created_by=self.system,
@@ -198,4 +261,28 @@ class PhaseATests(TestCase):
             format="json",
         )
 
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Editorial.all_objects.filter(pk=editorial.pk).exists())
+
+    def test_delete_with_relations_requires_explanation(self):
+        area = KnowledgeArea.objects.create(
+            name="Área con dependencia",
+            created_by=self.system,
+        )
+        program = AcademicProgram.objects.create(
+            name="Programa dependiente",
+            created_by=self.system,
+        )
+        SharedAcademicProgramKnowledgeArea.objects.create(
+            knowledge_area=area,
+            academic_program=program,
+            created_by=self.system,
+        )
+
+        response = self.client.delete(
+            f"/api/catalog/knowledge-areas/{area.pk}/",
+            {},
+            format="json",
+        )
         self.assertEqual(response.status_code, 400)
+        self.assertTrue(KnowledgeArea.objects.filter(pk=area.pk).exists())
