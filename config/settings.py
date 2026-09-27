@@ -1,1 +1,58 @@
-SECRET_KEY = 'django-insecure-zle*tbvjmdfk4q&-5a*3tp!a%k)p5kc@0yb&7h-s9a6$oy7br2'
+import os
+
+from dotenv import load_dotenv
+
+from .base import *
+
+load_dotenv()
+
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", os.getenv("SECRET_KEY"))
+DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in {"1", "true", "yes", "on"}
+ROOT_URLCONF = "project.urls"
+AUTH_USER_MODEL = "account.User"
+WSGI_APPLICATION = "project.wsgi.application"
+ASGI_APPLICATION = "project.asgi.application"
+
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost").split(",")
+    if host.strip()
+]
+
+if os.getenv("DJANGO_TESTING", "").lower() in {"1", "true", "yes", "on"}:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "test.sqlite3",
+        }
+    }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("POSTGRES_DB", os.getenv("DATABASE_NAME")),
+            "USER": os.getenv("POSTGRES_USER", os.getenv("DATABASE_USER")),
+            "PASSWORD": os.getenv(
+                "POSTGRES_PASSWORD",
+                os.getenv("DATABASE_PASSWORD"),
+            ),
+            "HOST": os.getenv(
+                "POSTGRES_HOST",
+                os.getenv("DATABASE_HOST", "db"),
+            ),
+            "PORT": os.getenv(
+                "POSTGRES_PORT",
+                os.getenv("DATABASE_PORT", "5432"),
+            ),
+            "OPTIONS": {"sslmode": "require"},
+        }
+    }
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "API Sistema de Revistas",
+    "DESCRIPTION": "Documentación de los endpoints del sistema.",
+    "VERSION": "1.0.0",
+}
+
+LANGUAGE_CODE = "es-mx"
+TIME_ZONE = "America/Mexico_City"
