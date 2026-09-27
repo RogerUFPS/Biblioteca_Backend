@@ -89,11 +89,16 @@ Para cada recurso, `{recurso}` representa una ruta base de la tabla anterior.
 | GET | `/api/catalog/{recurso}/archived/` | Listar registros eliminados | 200 |
 | PUT | `/api/catalog/{recurso}/{id}/` | Reemplazar un registro | 200 |
 | PATCH | `/api/catalog/{recurso}/{id}/` | Actualizar parcialmente | 200 |
-| DELETE | `/api/catalog/{recurso}/{id}/` | Borrado lógico | 204 |
+| DELETE | `/api/catalog/{recurso}/{id}/` | Borrado permanente o lógico según relaciones | 204/200 |
 | POST | `/api/catalog/{recurso}/{id}/restore/` | Restaurar un registro eliminado | 200 |
 
 Los listados no muestran registros eliminados. Un `GET` sobre un registro
 eliminado responde 404.
+
+Si el registro no tiene relaciones de negocio, `DELETE` lo elimina
+permanentemente y responde `204 No Content`. Si otros elementos dependen de él,
+se aplica borrado lógico y responde `200 OK` con un aviso; el registro queda
+desactivado y puede restaurarse.
 
 Para listar únicamente los registros eliminados, utiliza el endpoint
 `/archived/`. Por ejemplo:
@@ -155,6 +160,15 @@ La respuesta de listado usa paginación:
   "results": []
 }
 ```
+
+Cada página contiene siempre como máximo 10 elementos. Para solicitar otra
+página utiliza el parámetro `page`:
+
+```text
+GET /api/catalog/languages/?page=2
+```
+
+La respuesta incluye `count`, `next`, `previous` y `results`.
 
 ### 6.3 Consultar un registro
 
