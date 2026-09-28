@@ -62,8 +62,7 @@ JSON y pulsa **Execute**.
 | Tipos de material | `/api/catalog/material-types/` | `name` |
 | Editoriales | `/api/catalog/editorials/` | `name` |
 | Áreas de conocimiento | `/api/catalog/knowledge-areas/` | `name` |
-| Programas académicos | `/api/catalog/academic-programs/` | `name` |
-| Programa-área | `/api/catalog/academic-program-knowledge-areas/` | `knowledge_area`, `academic_program` |
+| Programas académicos | `/api/catalog/academic-programs/` | `name`, `knowledge_areas` (obligatorio al crear) |
 
 Los campos de auditoría son siempre de solo lectura:
 
@@ -194,30 +193,37 @@ curl -X POST http://localhost:8000/api/catalog/countries/ \
   -d "{\"name\":\"Colombia\",\"abbreviation\":\"CO\",\"emoji_flag\":\"🇨🇴\"}"
 ```
 
-### 6.6 Crear una relación programa-área
+### 6.6 Crear un programa con sus áreas
 
-Primero se necesitan los IDs de un programa y un área:
+Primero se crea el área:
 
 ```bash
-curl -X POST http://localhost:8000/api/catalog/academic-programs/ \
-  -H "Content-Type: application/json" \
-  -d "{\"name\":\"Ingeniería de Sistemas\"}"
-
 curl -X POST http://localhost:8000/api/catalog/knowledge-areas/ \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"Ingeniería\"}"
 ```
 
-Después se crea la relación:
+Luego se crea el programa enviando las áreas obligatoriamente:
 
 ```bash
-curl -X POST \
-  http://localhost:8000/api/catalog/academic-program-knowledge-areas/ \
+curl -X POST http://localhost:8000/api/catalog/academic-programs/ \
   -H "Content-Type: application/json" \
-  -d "{\"academic_program\":1,\"knowledge_area\":1}"
+  -d "{\"name\":\"Ingeniería de Sistemas\",\"knowledge_areas\":[1]}"
 ```
 
-El mismo par de IDs no se puede registrar dos veces.
+Las áreas de un programa se consultan así:
+
+```text
+GET /api/catalog/academic-programs/1/knowledge-areas/
+```
+
+Los programas que cubren un área se consultan así:
+
+```text
+GET /api/catalog/knowledge-areas/1/academic-programs/
+```
+
+La tabla intermedia no tiene un endpoint CRUD público.
 
 ## 7. Borrado lógico y restauración
 

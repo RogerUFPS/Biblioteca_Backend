@@ -1,7 +1,8 @@
 from apps.core.viewsets import AuditableViewSet
 
 from . import models, serializers
-from .filters import SharedAcademicProgramKnowledgeAreaFilter
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 
 class InstitutionViewSet(AuditableViewSet):
@@ -45,6 +46,22 @@ class KnowledgeAreaViewSet(AuditableViewSet):
     search_fields = ["name"]
     ordering_fields = ["name", "created_at"]
 
+    @action(detail=True, methods=["get"], url_path="academic-programs")
+    def academic_programs(self, request, pk=None):
+        area = self.get_object()
+        queryset = models.AcademicProgram.objects.filter(
+            knowledge_area_links__knowledge_area=area,
+        )
+        queryset = self.filter_queryset(queryset)
+        page = self.paginate_queryset(queryset)
+        serializer = serializers.AcademicProgramSerializer(
+            page if page is not None else queryset,
+            many=True,
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
 
 class AcademicProgramViewSet(AuditableViewSet):
     queryset = models.AcademicProgram.objects.all()
@@ -52,11 +69,18 @@ class AcademicProgramViewSet(AuditableViewSet):
     search_fields = ["name"]
     ordering_fields = ["name", "created_at"]
 
-
-class SharedAcademicProgramKnowledgeAreaViewSet(AuditableViewSet):
-    queryset = models.SharedAcademicProgramKnowledgeArea.objects.select_related(
-        "knowledge_area",
-        "academic_program",
-    )
-    serializer_class = serializers.SharedAcademicProgramKnowledgeAreaSerializer
-    filterset_class = SharedAcademicProgramKnowledgeAreaFilter
+    @action(detail=True, methods=["get"], url_path="knowledge-areas")
+    def knowledge_areas(self, request, pk=None):
+        program = self.get_object()
+        queryset = models.KnowledgeArea.objects.filter(
+            program_links__academic_program=program,
+        )
+        queryset = self.filter_queryset(queryset)
+        page = self.paginate_queryset(queryset)
+        serializer = serializers.KnowledgeAreaSerializer(
+            page if page is not None else queryset,
+            many=True,
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)

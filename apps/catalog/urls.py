@@ -10,10 +10,5 @@ router.register("material-types", views.MaterialTypeViewSet, basename="material-
 router.register("editorials", views.EditorialViewSet, basename="editorial")
 router.register("knowledge-areas", views.KnowledgeAreaViewSet, basename="knowledge-area")
 router.register("academic-programs", views.AcademicProgramViewSet, basename="academic-program")
-router.register(
-    "academic-program-knowledge-areas",
-    views.SharedAcademicProgramKnowledgeAreaViewSet,
-    basename="academic-program-knowledge-area",
-)
 
 urlpatterns = router.urls
