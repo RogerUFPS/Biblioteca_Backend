@@ -44,6 +44,16 @@ class ValidSintaxisSerializer(ArchivedNameMixin, serializers.ModelSerializer):
         fields = [*AUDIT_FIELDS, "name", "booleans", "parenthesis", "fields"]
         read_only_fields = AUDIT_FIELDS
 
+class ValidSintaxisPublicSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = models.ValidSintaxis
+        fields = [
+            "name",
+            "booleans",
+            "parenthesis",
+            "fields",
+        ]
 
 class LinkCheckLogSerializer(serializers.ModelSerializer):
 
@@ -58,7 +68,7 @@ class LinkCheckLogSerializer(serializers.ModelSerializer):
             "is_active",
             "last_check",
         ]
-        read_only_fields = AUDIT_FIELDS
+        read_only_fields = fields
 
 
 class PlatformSerializer(ArchivedNameMixin, serializers.ModelSerializer):
@@ -128,34 +138,64 @@ class PlatformSerializer(ArchivedNameMixin, serializers.ModelSerializer):
             )
         return representation
 
-    def _sync_relation(self, platform, new_objects, through_model, relation_field):
+    def _sync_relation(
+        self,
+        platform,
+        new_objects,
+        through_model,
+        relation_field,
+    ):
         user = platform.updated_by or platform.created_by
 
         current_links = through_model.objects.filter(platform=platform)
-        current_ids = set(current_links.values_list(f"{relation_field}_id", flat=True))
-        new_ids = {obj.id for obj in new_objects}
+
+        current_ids = set(
+            current_links.values_list(
+                f"{relation_field}_id",
+                flat=True,
+            )
+        )
+
+        unique_objects = {
+            obj.id: obj
+            for obj in new_objects
+        }
+
+        new_ids = set(unique_objects)
 
         ids_to_remove = current_ids - new_ids
         ids_to_add = new_ids - current_ids
 
         if ids_to_remove:
             links_to_remove = current_links.filter(
-                **{f"{relation_field}_id__in": ids_to_remove}
+                **{
+                    f"{relation_field}_id__in": ids_to_remove,
+                }
             )
+
             for link in links_to_remove:
                 link.soft_delete(
                     user=user,
-                    explanation="Relación eliminada durante la actualización de la plataforma.",
+                    explanation=(
+                        "Relación eliminada durante la actualización "
+                        "de la plataforma."
+                    ),
                 )
 
-        for obj in new_objects:
-            if obj.id not in ids_to_add:
-                continue
+        for obj_id in ids_to_add:
+            obj = unique_objects[obj_id]
 
-            lookup = {"platform": platform, relation_field: obj}
+            lookup = {
+                "platform": platform,
+                relation_field: obj,
+            }
+
             archived_link = (
                 through_model.all_objects
-                .filter(deleted_at__isnull=False, **lookup)
+                .filter(
+                    deleted_at__isnull=False,
+                    **lookup,
+                )
                 .first()
             )
 
@@ -163,11 +203,18 @@ class PlatformSerializer(ArchivedNameMixin, serializers.ModelSerializer):
                 archived_link.restore()
                 archived_link.updated_by = user
                 archived_link.updated_at = timezone.now()
-                archived_link.save(update_fields=["updated_by", "updated_at"])
+                archived_link.save(
+                    update_fields=[
+                        "updated_by",
+                        "updated_at",
+                    ]
+                )
             else:
                 through_model.objects.create(
                     platform=platform,
-                    **{relation_field: obj},
+                    **{
+                        relation_field: obj,
+                    },
                     created_by=user,
                 )
 
@@ -186,6 +233,21 @@ class PlatformSerializer(ArchivedNameMixin, serializers.ModelSerializer):
                 relation_data[data_field] = validated_data.pop(data_field)
 
         platform = super().create(validated_data)
+
+        was_archived = getattr(self, "_archived_instance", None) is not None
+
+        if was_archived:
+            platform.status = models.Platform.Status.BORRADOR
+            platform.validated_by = None
+            platform.validated_at = None
+
+            platform.save(
+                update_fields=[
+                    "status",
+                    "validated_by",
+                    "validated_at",
+                ]
+            )
 
         if raw_api_key is not None:
             platform.set_api_key(raw_api_key)
@@ -222,7 +284,7 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
     Serializador de solo lectura para la exploración pública.
     No expone: encrypted_api_key, campos de auditoría interna ni datos de validación.
     """
-    valid_sintaxis = ValidSintaxisSerializer(read_only=True)
+    valid_sintaxis = ValidSintaxisPublicSerializer(read_only=True)
     institutions = serializers.SerializerMethodField()
     languages = serializers.SerializerMethodField()
     countries = serializers.SerializerMethodField()
@@ -254,36 +316,60 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
 
     def get_institutions(self, obj):
         return list(
-            Institution.objects.filter(platform_support_links__platform=obj).values("id", "name")
+            Institution.objects.filter(
+                platform_support_links__platform=obj,
+                platform_support_links__deleted_at__isnull=True,
+            ).values("id", "name")
         )
 
     def get_languages(self, obj):
         return list(
-            Language.objects.filter(platform_links__platform=obj).values("id", "name", "abbreviation")
+            Language.objects.filter(
+                platform_links__platform=obj,
+                platform_links__deleted_at__isnull=True,
+            ).values("id", "name", "abbreviation")
         )
 
     def get_countries(self, obj):
         return list(
-            Country.objects.filter(platform_links__platform=obj).values("id", "name", "abbreviation", "emoji_flag")
+            Country.objects.filter(
+                platform_links__platform=obj,
+                platform_links__deleted_at__isnull=True,
+            ).values(
+                "id",
+                "name",
+                "abbreviation",
+                "emoji_flag",
+            )
         )
 
     def get_knowledge_areas(self, obj):
         return list(
-            KnowledgeArea.objects.filter(platform_links__platform=obj).values("id", "name")
+            KnowledgeArea.objects.filter(
+                platform_links__platform=obj,
+                platform_links__deleted_at__isnull=True,
+            ).values("id", "name")
         )
 
     def get_material_types(self, obj):
         return list(
-            MaterialType.objects.filter(platform_links__platform=obj).values("id", "name")
+            MaterialType.objects.filter(
+                platform_links__platform=obj,
+                platform_links__deleted_at__isnull=True,
+            ).values("id", "name")
         )
 
     def get_academic_programs(self, obj):
         return list(
-            AcademicProgram.objects.filter(platform_links__platform=obj).values("id", "name")
+            AcademicProgram.objects.filter(
+                platform_links__platform=obj,
+                platform_links__deleted_at__isnull=True,
+            ).values("id", "name")
         )
 
     def get_link_status(self, obj):
         latest_log = obj.link_check_logs.first()
+
         if latest_log:
             return {
                 "is_active": latest_log.is_active,
@@ -291,6 +377,6 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
             }
 
         return {
-            "is_active": True,
+            "is_active": None,
             "last_check": None,
         }
