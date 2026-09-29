@@ -7,9 +7,7 @@ class CustomPageNumberPagination(PageNumberPagination):
     max_page_size = 100
 
     def get_paginated_response(self, data):
-        start_number = (
-            (self.page.number - 1) * self.get_page_size(self.request)
-        ) + 1
+        start_number = self.page.start_index()
 
         results = [
             {
