@@ -1,4 +1,4 @@
-import django_filters
+import django_filters  # type: ignore[import-untyped]
 
 from . import models
 
