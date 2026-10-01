@@ -1,6 +1,8 @@
 from django.db import transaction
 from rest_framework import serializers
 
+from drf_spectacular.utils import extend_schema_field
+
 from apps.catalog.models import (
     AcademicProgram,
     Country,
@@ -16,6 +18,7 @@ from apps.core.serializers import (
 from apps.core.viewsets import ArchivedNameMixin
 
 from . import models
+
 
 PLATFORM_RELATION_CONFIG = (
     RelationConfig(
@@ -50,6 +53,7 @@ PLATFORM_RELATION_CONFIG = (
     ),
 )
 
+
 AUDIT_FIELDS = (
     "id",
     "created_by",
@@ -61,6 +65,7 @@ AUDIT_FIELDS = (
     "delete_explanation",
 )
 
+
 class ValidSintaxisSerializer(
     ArchivedNameMixin,
     serializers.ModelSerializer,
@@ -69,6 +74,7 @@ class ValidSintaxisSerializer(
 
     class Meta:
         model = models.ValidSintaxis
+
         fields = [
             *AUDIT_FIELDS,
             "name",
@@ -76,13 +82,16 @@ class ValidSintaxisSerializer(
             "parenthesis",
             "fields",
         ]
+
         read_only_fields = AUDIT_FIELDS
+
 
 class ValidSintaxisPublicSerializer(
     serializers.ModelSerializer,
 ):
     class Meta:
         model = models.ValidSintaxis
+
         fields = [
             "name",
             "booleans",
@@ -90,11 +99,13 @@ class ValidSintaxisPublicSerializer(
             "fields",
         ]
 
+
 class LinkCheckLogSerializer(
     serializers.ModelSerializer,
 ):
     class Meta:
         model = models.LinkCheckLog
+
         fields = [
             *AUDIT_FIELDS,
             "platform",
@@ -104,7 +115,9 @@ class LinkCheckLogSerializer(
             "is_active",
             "last_check",
         ]
+
         read_only_fields = AUDIT_FIELDS
+
 
 class PlatformSerializer(
     SoftDeleteRelationSyncMixin,
@@ -322,6 +335,71 @@ class PlatformSerializer(
 
         return platform
 
+
+# ==============================================================================
+# ESQUEMAS DE RESPUESTA PÚBLICA PARA SWAGGER
+# ==============================================================================
+
+
+class PlatformPublicInstitutionSchemaSerializer(
+    serializers.Serializer,
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class PlatformPublicLanguageSchemaSerializer(
+    serializers.Serializer,
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    abbreviation = serializers.CharField()
+
+
+class PlatformPublicCountrySchemaSerializer(
+    serializers.Serializer,
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    abbreviation = serializers.CharField()
+    emoji_flag = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+    )
+
+
+class PlatformPublicKnowledgeAreaSchemaSerializer(
+    serializers.Serializer,
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class PlatformPublicMaterialTypeSchemaSerializer(
+    serializers.Serializer,
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class PlatformPublicAcademicProgramSchemaSerializer(
+    serializers.Serializer,
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class PlatformPublicLinkStatusSchemaSerializer(
+    serializers.Serializer,
+):
+    is_active = serializers.BooleanField(
+        allow_null=True,
+    )
+    last_check = serializers.DateTimeField(
+        allow_null=True,
+    )
+
+
 class PlatformPublicSerializer(
     serializers.ModelSerializer,
 ):
@@ -369,6 +447,9 @@ class PlatformPublicSerializer(
             "link_status",
         ]
 
+    @extend_schema_field(
+        PlatformPublicInstitutionSchemaSerializer(many=True)
+    )
     def get_institutions(self, obj):
         return list(
             Institution.objects.filter(
@@ -380,6 +461,9 @@ class PlatformPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        PlatformPublicLanguageSchemaSerializer(many=True)
+    )
     def get_languages(self, obj):
         return list(
             Language.objects.filter(
@@ -392,6 +476,9 @@ class PlatformPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        PlatformPublicCountrySchemaSerializer(many=True)
+    )
     def get_countries(self, obj):
         return list(
             Country.objects.filter(
@@ -405,6 +492,9 @@ class PlatformPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        PlatformPublicKnowledgeAreaSchemaSerializer(many=True)
+    )
     def get_knowledge_areas(self, obj):
         return list(
             KnowledgeArea.objects.filter(
@@ -416,6 +506,9 @@ class PlatformPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        PlatformPublicMaterialTypeSchemaSerializer(many=True)
+    )
     def get_material_types(self, obj):
         return list(
             MaterialType.objects.filter(
@@ -427,6 +520,9 @@ class PlatformPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        PlatformPublicAcademicProgramSchemaSerializer(many=True)
+    )
     def get_academic_programs(self, obj):
         return list(
             AcademicProgram.objects.filter(
@@ -438,6 +534,9 @@ class PlatformPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        PlatformPublicLinkStatusSchemaSerializer
+    )
     def get_link_status(self, obj):
         latest_log = obj.link_check_logs.first()
 
@@ -451,3 +550,4 @@ class PlatformPublicSerializer(
             "is_active": None,
             "last_check": None,
         }
+        
