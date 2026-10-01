@@ -1,3 +1,15 @@
 from django.contrib import admin
 
-# Register your models here.
+from . import models
+
+
+for model in [
+    models.Journal,
+    models.SharedJournalLanguage,
+    models.SharedJournalCountry,
+    models.SharedJournalKnowledgeArea,
+    models.SharedJournalMaterialType,
+    models.SharedJournalAcademicProgram,
+    models.SharedJournalPlatform,
+]:
+    admin.site.register(model)
