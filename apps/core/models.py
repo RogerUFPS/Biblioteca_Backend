@@ -75,7 +75,6 @@ class AuditableModel(SoftDeleteMixin):
         blank=True,
         related_name="%(app_label)s_%(class)s_deleted",
     )
-    deleted_at = models.DateTimeField(null=True, blank=True)
 
     objects = AliveManager()
     all_objects = models.Manager()
