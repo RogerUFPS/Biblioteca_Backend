@@ -16,6 +16,7 @@ INSTALLED_APPS = [
     "apps.account",
     "apps.catalog",
     "apps.platforms",
+    "apps.journal",
 ]
 
 MIDDLEWARE = [
@@ -54,6 +55,17 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 10,
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "RABD-2026 API",
+    "DESCRIPTION": (
+        "API del proyecto Repositorio y Agente Orientador "
+        "de Bases de Datos de Acceso Abierto."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
 }
 
 LANGUAGE_CODE = 'en-us'
