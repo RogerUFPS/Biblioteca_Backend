@@ -1,6 +1,8 @@
 from django.db import transaction
 from rest_framework import serializers
 
+from drf_spectacular.utils import extend_schema_field
+
 from apps.catalog.models import (
     AcademicProgram,
     Country,
@@ -505,6 +507,70 @@ class JournalSerializer(
         return journal
 
 
+# ==============================================================================
+# ESQUEMAS DE RESPUESTA PÚBLICA PARA SWAGGER
+# ==============================================================================
+
+
+class JournalPublicLanguageSchemaSerializer(
+    serializers.Serializer
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    abbreviation = serializers.CharField()
+
+
+class JournalPublicCountrySchemaSerializer(
+    serializers.Serializer
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    abbreviation = serializers.CharField()
+    emoji_flag = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+    )
+
+
+class JournalPublicKnowledgeAreaSchemaSerializer(
+    serializers.Serializer
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class JournalPublicMaterialTypeSchemaSerializer(
+    serializers.Serializer
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class JournalPublicAcademicProgramSchemaSerializer(
+    serializers.Serializer
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class JournalPublicPlatformSchemaSerializer(
+    serializers.Serializer
+):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    base_api_url = serializers.URLField(
+        allow_blank=True,
+        allow_null=True,
+    )
+    start_period = serializers.DateField(
+        allow_null=True,
+    )
+    finish_period = serializers.DateField(
+        allow_null=True,
+    )
+    has_full_text = serializers.BooleanField()
+
+
 class JournalPublicSerializer(
     serializers.ModelSerializer
 ):
@@ -566,6 +632,9 @@ class JournalPublicSerializer(
             "platforms",
         ]
 
+    @extend_schema_field(
+        JournalPublicLanguageSchemaSerializer(many=True)
+    )
     def get_languages(self, obj):
         return list(
             Language.objects.filter(
@@ -578,6 +647,9 @@ class JournalPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        JournalPublicCountrySchemaSerializer(many=True)
+    )
     def get_countries(self, obj):
         return list(
             Country.objects.filter(
@@ -591,6 +663,9 @@ class JournalPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        JournalPublicKnowledgeAreaSchemaSerializer(many=True)
+    )
     def get_knowledge_areas(self, obj):
         return list(
             KnowledgeArea.objects.filter(
@@ -602,6 +677,9 @@ class JournalPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        JournalPublicMaterialTypeSchemaSerializer(many=True)
+    )
     def get_material_types(self, obj):
         return list(
             MaterialType.objects.filter(
@@ -613,6 +691,9 @@ class JournalPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        JournalPublicAcademicProgramSchemaSerializer(many=True)
+    )
     def get_academic_programs(self, obj):
         return list(
             AcademicProgram.objects.filter(
@@ -624,6 +705,9 @@ class JournalPublicSerializer(
             )
         )
 
+    @extend_schema_field(
+        JournalPublicPlatformSchemaSerializer(many=True)
+    )
     def get_platforms(self, obj):
         links = (
             models.SharedJournalPlatform.objects
