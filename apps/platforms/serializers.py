@@ -1,5 +1,4 @@
 from django.db import transaction
-from django.utils import timezone
 from rest_framework import serializers
 
 from apps.catalog.models import (
@@ -10,18 +9,45 @@ from apps.catalog.models import (
     Language,
     MaterialType,
 )
+from apps.core.serializers import (
+    RelationConfig,
+    SoftDeleteRelationSyncMixin,
+)
 from apps.core.viewsets import ArchivedNameMixin
 
 from . import models
 
 PLATFORM_RELATION_CONFIG = (
-    # (data_field, through_model, relation_field, manager_name, id_field)
-    ("institutions",      models.SharedPlatformSupport,       "institution",     "support_links",          "institution_id"),
-    ("languages",         models.SharedPlatformLanguage,      "language",        "language_links",         "language_id"),
-    ("countries",         models.SharedPlatformCountry,       "country",         "country_links",          "country_id"),
-    ("knowledge_areas",   models.SharedPlatformKnowledgeArea, "knowledge_area",  "knowledge_area_links",   "knowledge_area_id"),
-    ("material_types",    models.SharedPlatformMaterialType,  "material_type",   "material_type_links",    "material_type_id"),
-    ("academic_programs", models.SharedPlatformAcademicProgram, "academic_program", "academic_program_links", "academic_program_id"),
+    RelationConfig(
+        data_field="institutions",
+        through_model=models.SharedPlatformSupport,
+        relation_field="institution",
+    ),
+    RelationConfig(
+        data_field="languages",
+        through_model=models.SharedPlatformLanguage,
+        relation_field="language",
+    ),
+    RelationConfig(
+        data_field="countries",
+        through_model=models.SharedPlatformCountry,
+        relation_field="country",
+    ),
+    RelationConfig(
+        data_field="knowledge_areas",
+        through_model=models.SharedPlatformKnowledgeArea,
+        relation_field="knowledge_area",
+    ),
+    RelationConfig(
+        data_field="material_types",
+        through_model=models.SharedPlatformMaterialType,
+        relation_field="material_type",
+    ),
+    RelationConfig(
+        data_field="academic_programs",
+        through_model=models.SharedPlatformAcademicProgram,
+        relation_field="academic_program",
+    ),
 )
 
 AUDIT_FIELDS = (
@@ -35,17 +61,26 @@ AUDIT_FIELDS = (
     "delete_explanation",
 )
 
-
-class ValidSintaxisSerializer(ArchivedNameMixin, serializers.ModelSerializer):
+class ValidSintaxisSerializer(
+    ArchivedNameMixin,
+    serializers.ModelSerializer,
+):
     archived_unique_fields = ("name",)
 
     class Meta:
         model = models.ValidSintaxis
-        fields = [*AUDIT_FIELDS, "name", "booleans", "parenthesis", "fields"]
+        fields = [
+            *AUDIT_FIELDS,
+            "name",
+            "booleans",
+            "parenthesis",
+            "fields",
+        ]
         read_only_fields = AUDIT_FIELDS
 
-class ValidSintaxisPublicSerializer(serializers.ModelSerializer):
-
+class ValidSintaxisPublicSerializer(
+    serializers.ModelSerializer,
+):
     class Meta:
         model = models.ValidSintaxis
         fields = [
@@ -55,8 +90,9 @@ class ValidSintaxisPublicSerializer(serializers.ModelSerializer):
             "fields",
         ]
 
-class LinkCheckLogSerializer(serializers.ModelSerializer):
-
+class LinkCheckLogSerializer(
+    serializers.ModelSerializer,
+):
     class Meta:
         model = models.LinkCheckLog
         fields = [
@@ -68,40 +104,89 @@ class LinkCheckLogSerializer(serializers.ModelSerializer):
             "is_active",
             "last_check",
         ]
-        read_only_fields = fields
+        read_only_fields = AUDIT_FIELDS
 
+class PlatformSerializer(
+    SoftDeleteRelationSyncMixin,
+    ArchivedNameMixin,
+    serializers.ModelSerializer,
+):
+    """
+    Serializador administrativo de plataformas.
 
-class PlatformSerializer(ArchivedNameMixin, serializers.ModelSerializer):
+    Las relaciones mediante tablas intermedias se sincronizan
+    mediante SoftDeleteRelationSyncMixin.
+
+    La identificación de plataformas archivadas y su restauración
+    se maneja mediante ArchivedNameMixin.
+    """
+
     archived_unique_fields = ("name",)
+
+    relation_config = PLATFORM_RELATION_CONFIG
+
+    relation_parent_field = "platform"
+
+    relation_delete_explanation = (
+        "Relación eliminada durante la actualización "
+        "de la plataforma."
+    )
 
     api_key = serializers.CharField(
         write_only=True,
         required=False,
         allow_blank=True,
-        help_text="Clave de API en texto plano; se almacenará cifrada.",
+        help_text=(
+            "Clave de API en texto plano; "
+            "se almacenará cifrada."
+        ),
     )
 
     institutions = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=Institution.objects.all(), required=False, write_only=True,
+        many=True,
+        queryset=Institution.objects.all(),
+        required=False,
+        write_only=True,
     )
+
     languages = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=Language.objects.all(), required=False, write_only=True,
+        many=True,
+        queryset=Language.objects.all(),
+        required=False,
+        write_only=True,
     )
+
     countries = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=Country.objects.all(), required=False, write_only=True,
+        many=True,
+        queryset=Country.objects.all(),
+        required=False,
+        write_only=True,
     )
+
     knowledge_areas = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=KnowledgeArea.objects.all(), required=False, write_only=True,
+        many=True,
+        queryset=KnowledgeArea.objects.all(),
+        required=False,
+        write_only=True,
     )
+
     material_types = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=MaterialType.objects.all(), required=False, write_only=True,
+        many=True,
+        queryset=MaterialType.objects.all(),
+        required=False,
+        write_only=True,
     )
+
     academic_programs = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=AcademicProgram.objects.all(), required=False, write_only=True,
+        many=True,
+        queryset=AcademicProgram.objects.all(),
+        required=False,
+        write_only=True,
     )
 
     class Meta:
         model = models.Platform
+
         fields = [
             *AUDIT_FIELDS,
             "name",
@@ -123,6 +208,7 @@ class PlatformSerializer(ArchivedNameMixin, serializers.ModelSerializer):
             "material_types",
             "academic_programs",
         ]
+
         read_only_fields = [
             *AUDIT_FIELDS,
             "status",
@@ -132,112 +218,41 @@ class PlatformSerializer(ArchivedNameMixin, serializers.ModelSerializer):
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
-        for data_field, _, _, manager_name, id_field in PLATFORM_RELATION_CONFIG:
-            representation[data_field] = list(
-                getattr(instance, manager_name).values_list(id_field, flat=True)
-            )
-        return representation
 
-    def _sync_relation(
-        self,
-        platform,
-        new_objects,
-        through_model,
-        relation_field,
-    ):
-        user = platform.updated_by or platform.created_by
-
-        current_links = through_model.objects.filter(platform=platform)
-
-        current_ids = set(
-            current_links.values_list(
-                f"{relation_field}_id",
-                flat=True,
-            )
+        return self._represent_relations(
+            instance=instance,
+            representation=representation,
         )
-
-        unique_objects = {
-            obj.id: obj
-            for obj in new_objects
-        }
-
-        new_ids = set(unique_objects)
-
-        ids_to_remove = current_ids - new_ids
-        ids_to_add = new_ids - current_ids
-
-        if ids_to_remove:
-            links_to_remove = current_links.filter(
-                **{
-                    f"{relation_field}_id__in": ids_to_remove,
-                }
-            )
-
-            for link in links_to_remove:
-                link.soft_delete(
-                    user=user,
-                    explanation=(
-                        "Relación eliminada durante la actualización "
-                        "de la plataforma."
-                    ),
-                )
-
-        for obj_id in ids_to_add:
-            obj = unique_objects[obj_id]
-
-            lookup = {
-                "platform": platform,
-                relation_field: obj,
-            }
-
-            archived_link = (
-                through_model.all_objects
-                .filter(
-                    deleted_at__isnull=False,
-                    **lookup,
-                )
-                .first()
-            )
-
-            if archived_link:
-                archived_link.restore()
-                archived_link.updated_by = user
-                archived_link.updated_at = timezone.now()
-                archived_link.save(
-                    update_fields=[
-                        "updated_by",
-                        "updated_at",
-                    ]
-                )
-            else:
-                through_model.objects.create(
-                    platform=platform,
-                    **{
-                        relation_field: obj,
-                    },
-                    created_by=user,
-                )
-
-    def _sync_relations(self, platform, data):
-        for data_field, through_model, relation_field, _, _ in PLATFORM_RELATION_CONFIG:
-            if data_field in data:
-                self._sync_relation(platform, data[data_field], through_model, relation_field)
 
     @transaction.atomic
     def create(self, validated_data):
-        raw_api_key = validated_data.pop("api_key", None)
+        raw_api_key = validated_data.pop(
+            "api_key",
+            None,
+        )
 
-        relation_data = {}
-        for data_field, *_ in PLATFORM_RELATION_CONFIG:
-            if data_field in validated_data:
-                relation_data[data_field] = validated_data.pop(data_field)
+        relation_data = self._extract_relation_data(
+            validated_data
+        )
 
-        platform = super().create(validated_data)
+        platform = super().create(
+            validated_data
+        )
 
-        was_archived = getattr(self, "_archived_instance", None) is not None
+        was_archived = (
+            getattr(
+                self,
+                "_archived_instance",
+                None,
+            )
+            is not None
+        )
 
         if was_archived:
-            platform.status = models.Platform.Status.BORRADOR
+            platform.status = (
+                models.Platform.Status.BORRADOR
+            )
+
             platform.validated_by = None
             platform.validated_at = None
 
@@ -250,41 +265,80 @@ class PlatformSerializer(ArchivedNameMixin, serializers.ModelSerializer):
             )
 
         if raw_api_key is not None:
-            platform.set_api_key(raw_api_key)
-            platform.save(update_fields=["encrypted_api_key"])
+            platform.set_api_key(
+                raw_api_key
+            )
+
+            platform.save(
+                update_fields=[
+                    "encrypted_api_key",
+                ]
+            )
 
         if relation_data:
-            self._sync_relations(platform, relation_data)
+            self._sync_relations(
+                parent=platform,
+                relation_data=relation_data,
+            )
 
         return platform
 
     @transaction.atomic
-    def update(self, instance, validated_data):
-        raw_api_key = validated_data.pop("api_key", None)
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
+        raw_api_key = validated_data.pop(
+            "api_key",
+            None,
+        )
 
-        relation_data = {}
-        for data_field, *_ in PLATFORM_RELATION_CONFIG:
-            if data_field in validated_data:
-                relation_data[data_field] = validated_data.pop(data_field)
+        relation_data = self._extract_relation_data(
+            validated_data
+        )
 
-        platform = super().update(instance, validated_data)
+        platform = super().update(
+            instance,
+            validated_data,
+        )
 
         if raw_api_key is not None:
-            platform.set_api_key(raw_api_key)
-            platform.save(update_fields=["encrypted_api_key"])
+            platform.set_api_key(
+                raw_api_key
+            )
+
+            platform.save(
+                update_fields=[
+                    "encrypted_api_key",
+                ]
+            )
 
         if relation_data:
-            self._sync_relations(platform, relation_data)
+            self._sync_relations(
+                parent=platform,
+                relation_data=relation_data,
+            )
 
         return platform
 
-
-class PlatformPublicSerializer(serializers.ModelSerializer):
+class PlatformPublicSerializer(
+    serializers.ModelSerializer,
+):
     """
     Serializador de solo lectura para la exploración pública.
-    No expone: encrypted_api_key, campos de auditoría interna ni datos de validación.
+
+    No expone:
+
+    - encrypted_api_key;
+    - campos de auditoría interna;
+    - datos internos de validación.
     """
-    valid_sintaxis = ValidSintaxisPublicSerializer(read_only=True)
+
+    valid_sintaxis = ValidSintaxisPublicSerializer(
+        read_only=True
+    )
+
     institutions = serializers.SerializerMethodField()
     languages = serializers.SerializerMethodField()
     countries = serializers.SerializerMethodField()
@@ -295,6 +349,7 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.Platform
+
         fields = [
             "id",
             "name",
@@ -319,7 +374,10 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
             Institution.objects.filter(
                 platform_support_links__platform=obj,
                 platform_support_links__deleted_at__isnull=True,
-            ).values("id", "name")
+            ).values(
+                "id",
+                "name",
+            )
         )
 
     def get_languages(self, obj):
@@ -327,7 +385,11 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
             Language.objects.filter(
                 platform_links__platform=obj,
                 platform_links__deleted_at__isnull=True,
-            ).values("id", "name", "abbreviation")
+            ).values(
+                "id",
+                "name",
+                "abbreviation",
+            )
         )
 
     def get_countries(self, obj):
@@ -348,7 +410,10 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
             KnowledgeArea.objects.filter(
                 platform_links__platform=obj,
                 platform_links__deleted_at__isnull=True,
-            ).values("id", "name")
+            ).values(
+                "id",
+                "name",
+            )
         )
 
     def get_material_types(self, obj):
@@ -356,7 +421,10 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
             MaterialType.objects.filter(
                 platform_links__platform=obj,
                 platform_links__deleted_at__isnull=True,
-            ).values("id", "name")
+            ).values(
+                "id",
+                "name",
+            )
         )
 
     def get_academic_programs(self, obj):
@@ -364,7 +432,10 @@ class PlatformPublicSerializer(serializers.ModelSerializer):
             AcademicProgram.objects.filter(
                 platform_links__platform=obj,
                 platform_links__deleted_at__isnull=True,
-            ).values("id", "name")
+            ).values(
+                "id",
+                "name",
+            )
         )
 
     def get_link_status(self, obj):
