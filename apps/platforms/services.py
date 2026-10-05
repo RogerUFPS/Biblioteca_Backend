@@ -2,6 +2,7 @@ import ipaddress
 import socket
 from typing import cast
 from urllib.parse import urlsplit
+
 import httpx
 from django.db import transaction
 from django.utils import timezone
@@ -81,10 +82,25 @@ def validate_platform_for_publication(
             "La plataforma debe tener un nombre."
         )
 
-    if not platform.base_api_url or not platform.base_api_url.strip():
-        errors["base_api_url"] = (
-            "La plataforma debe tener una URL antes de publicarse."
+    # La URL pública es independiente de base_api_url.
+    # Debe existir al menos una verificación registrada en el historial.
+    if not models.LinkCheckLog.objects.filter(
+        platform=platform,
+    ).exists():
+        errors["url"] = (
+            "La plataforma debe tener una URL pública registrada "
+            "en el historial de verificación de enlaces."
         )
+
+    # Una API Key solamente tiene sentido si existe una API base.
+    if platform.encrypted_api_key:
+        if not platform.base_api_url or not platform.base_api_url.strip():
+            errors["base_api_url"] = (
+                "La plataforma debe tener una URL de API "
+                "si tiene una API Key configurada."
+            )
+
+    # Si no tiene API Key, base_api_url es completamente opcional.
 
     if not platform.start_period:
         errors["start_period"] = (
@@ -226,6 +242,8 @@ def _is_public_ip_address(
 
 def _validate_safe_http_url(
     url: str,
+    *,
+    field_name: str = "url",
 ) -> None:
     """
     Valida que una URL pueda consultarse de forma segura.
@@ -239,14 +257,14 @@ def _validate_safe_http_url(
         port = parsed_url.port
     except ValueError:
         raise ValidationError({
-            "base_api_url": (
+            field_name: (
                 "La URL configurada no es válida."
             )
         })
 
     if parsed_url.scheme.lower() not in {"http", "https"}:
         raise ValidationError({
-            "base_api_url": (
+            field_name: (
                 "La URL debe utilizar el protocolo HTTP o HTTPS."
             )
         })
@@ -255,14 +273,14 @@ def _validate_safe_http_url(
 
     if not hostname:
         raise ValidationError({
-            "base_api_url": (
+            field_name: (
                 "La URL debe contener un nombre de host válido."
             )
         })
 
     if parsed_url.username or parsed_url.password:
         raise ValidationError({
-            "base_api_url": (
+            field_name: (
                 "La URL no puede contener credenciales embebidas."
             )
         })
@@ -275,7 +293,7 @@ def _validate_safe_http_url(
         or hostname.endswith(".local")
     ):
         raise ValidationError({
-            "base_api_url": (
+            field_name: (
                 "La URL no puede apuntar a un recurso local."
             )
         })
@@ -288,7 +306,7 @@ def _validate_safe_http_url(
     if direct_ip is not None:
         if not _is_public_ip_address(hostname):
             raise ValidationError({
-                "base_api_url": (
+                field_name: (
                     "La URL no puede apuntar a una dirección IP "
                     "privada, local o reservada."
                 )
@@ -319,7 +337,7 @@ def _validate_safe_http_url(
     for resolved_address in resolved_addresses:
         if not _is_public_ip_address(resolved_address):
             raise ValidationError({
-                "base_api_url": (
+                field_name: (
                     "La URL resuelve a una dirección de red "
                     "privada, local o reservada."
                 )
@@ -329,12 +347,14 @@ def _validate_safe_http_url(
 def _get_next_fail_count(
     platform: models.Platform,
     *,
+    url: str,
     is_active: bool,
 ) -> int:
     """
-    Calcula la cantidad de fallos consecutivos del enlace.
+    Calcula la cantidad de fallos consecutivos para una URL específica.
 
     Una verificación exitosa reinicia el contador a cero.
+    Si cambia la URL pública, la nueva URL inicia una secuencia independiente.
     """
 
     if is_active:
@@ -342,7 +362,10 @@ def _get_next_fail_count(
 
     latest_log = (
         models.LinkCheckLog.objects
-        .filter(platform=platform)
+        .filter(
+            platform=platform,
+            url=url,
+        )
         .order_by("-last_check", "-pk")
         .first()
     )
@@ -487,7 +510,6 @@ def reactivate_platform(
 
     platform.status = models.Platform.Status.BORRADOR
 
-    # La validación anterior deja de ser vigente.
     platform.validated_by = None
     platform.validated_at = None
 
@@ -511,12 +533,15 @@ def check_platform_link(
     *,
     platform: models.Platform,
     user,
+    url: str | None = None,
 ) -> models.LinkCheckLog:
     """
-    Verifica la disponibilidad del enlace de una plataforma
+    Verifica la disponibilidad de la URL pública de una plataforma
     y registra el resultado en LinkCheckLog.
 
-    El fail_count representa la cantidad de fallos consecutivos.
+    ``base_api_url`` representa la API utilizada para cosecha y no
+    se utiliza como URL pública. Si no se suministra ``url``, se utiliza
+    la URL del último registro del historial.
     """
 
     platform_snapshot = (
@@ -532,18 +557,31 @@ def check_platform_link(
             )
         })
 
-    if not platform_snapshot.base_api_url:
-        raise ValidationError({
-            "base_api_url": (
-                "La plataforma no tiene una URL configurada."
-            )
-        })
+    if url is None or not str(url).strip():
+        latest_log = (
+            models.LinkCheckLog.objects
+            .filter(platform=platform_snapshot)
+            .order_by("-last_check", "-pk")
+            .first()
+        )
 
-    url = platform_snapshot.base_api_url.strip()
+        if latest_log is None:
+            raise ValidationError({
+                "url": (
+                    "La plataforma no tiene una URL pública registrada "
+                    "en el historial de verificación de enlaces."
+                )
+            })
 
-    _validate_safe_http_url(url)
+        resolved_url: str = latest_log.url.strip()
+    else:
+        resolved_url = url.strip()
 
-    status_code, is_active = _perform_link_check(url)
+    _validate_safe_http_url(resolved_url)
+
+    status_code, is_active = _perform_link_check(
+        resolved_url
+    )
 
     with transaction.atomic():
         current_platform = (
@@ -560,26 +598,15 @@ def check_platform_link(
                 )
             })
 
-        current_url = (
-            current_platform.base_api_url or ""
-        ).strip()
-
-        if current_url != url:
-            raise ValidationError({
-                "base_api_url": (
-                    "La URL de la plataforma cambió durante "
-                    "la verificación. Debe realizarse nuevamente."
-                )
-            })
-
         fail_count = _get_next_fail_count(
             current_platform,
+            url=resolved_url,
             is_active=is_active,
         )
 
         link_log = models.LinkCheckLog.objects.create(
             platform=current_platform,
-            url=url,
+            url=resolved_url,
             fail_count=fail_count,
             http_status_code=status_code,
             is_active=is_active,
