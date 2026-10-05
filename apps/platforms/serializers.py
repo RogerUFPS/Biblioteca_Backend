@@ -10,6 +10,7 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
+    SharedAcademicProgramKnowledgeArea,
 )
 from apps.core.serializers import (
     RelationConfig,
@@ -66,11 +67,49 @@ AUDIT_FIELDS = (
 )
 
 
+VALID_SINTAXIS_FIELD_KEYS = (
+    "title",
+    "author",
+    "subject",
+    "issn",
+    "language",
+    "year",
+)
+
+
+"""
+Plantilla inmutable para el campo ``fields`` de ValidSintaxis.
+
+Las claves canónicas permitidas se mantienen en una tupla inmutable.
+El valor almacenado en ``fields`` contiene el prefijo/parámetro que
+la plataforma utiliza para cada campo.
+
+Ejemplo::
+
+    {
+        "title":    "ti",
+        "author":   "au",
+        "subject":  "su",
+        "issn":     "is",
+        "language": "la",
+        "year":     "yr"
+    }
+"""
+
+
 class ValidSintaxisSerializer(
     ArchivedNameMixin,
     serializers.ModelSerializer,
 ):
     archived_unique_fields = ("name",)
+
+    fields_template = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=(
+            "Plantilla de referencia para construir el campo ``fields``. "
+            "Muestra las claves canónicas admitidas con sus valores vacíos."
+        ),
+    )
 
     class Meta:
         model = models.ValidSintaxis
@@ -81,9 +120,55 @@ class ValidSintaxisSerializer(
             "booleans",
             "parenthesis",
             "fields",
+            "fields_template",
         ]
 
-        read_only_fields = AUDIT_FIELDS
+        read_only_fields = [
+            *AUDIT_FIELDS,
+            "fields_template",
+        ]
+
+        extra_kwargs = {
+            "fields": {
+                "help_text": (
+                    "Mapeo de campos semánticos a prefijos de la API. "
+                    "Use ``fields_template`` como referencia de las claves disponibles. "
+                    "Ejemplo: {\"title\": \"ti\", \"author\": \"au\", \"issn\": \"is\"}"
+                ),
+            }
+        }
+
+    def get_fields_template(self, obj):
+        return {key: "" for key in VALID_SINTAXIS_FIELD_KEYS}
+
+    def validate_fields(self, value):
+        """
+        Valida que el campo ``fields`` sea un diccionario plano
+        de strings y que sus claves sean un subconjunto de la
+        plantilla canónica.
+        """
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(
+                "El campo debe ser un objeto JSON (diccionario)."
+            )
+
+        allowed_keys = set(VALID_SINTAXIS_FIELD_KEYS)
+        invalid_keys = set(value.keys()) - allowed_keys
+
+        if invalid_keys:
+            raise serializers.ValidationError(
+                f"Las siguientes claves no están permitidas: "
+                f"{sorted(invalid_keys)}. "
+                f"Claves válidas: {sorted(allowed_keys)}."
+            )
+
+        for key, val in value.items():
+            if not isinstance(val, str):
+                raise serializers.ValidationError(
+                    f"El valor de la clave '{key}' debe ser una cadena de texto."
+                )
+
+        return value
 
 
 class ValidSintaxisPublicSerializer(
@@ -130,14 +215,14 @@ class PlatformSerializer(
     Las relaciones mediante tablas intermedias se sincronizan
     mediante SoftDeleteRelationSyncMixin.
 
-    La identificación de plataformas archivadas y su restauración
-    se maneja mediante ArchivedNameMixin.
+    La relación con áreas del conocimiento no se recibe directamente
+    del cliente: se deriva automáticamente a partir de los programas
+    académicos seleccionados y de SharedAcademicProgramKnowledgeArea.
     """
 
     archived_unique_fields = ("name",)
 
     relation_config = PLATFORM_RELATION_CONFIG
-
     relation_parent_field = "platform"
 
     relation_delete_explanation = (
@@ -148,10 +233,23 @@ class PlatformSerializer(
     api_key = serializers.CharField(
         write_only=True,
         required=False,
+        allow_null=True,
         allow_blank=True,
         help_text=(
-            "Clave de API en texto plano; "
-            "se almacenará cifrada."
+            "Clave de API en texto plano; es opcional. "
+            "Solo puede configurarse si existe base_api_url. "
+            "Se almacenará cifrada."
+        ),
+    )
+
+    base_api_url = serializers.URLField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text=(
+            "URL base de la API utilizada para cosecha automatizada. "
+            "Es opcional cuando la plataforma solo se registra como referencia. "
+            "Si se configura una API Key, esta URL es obligatoria."
         ),
     )
 
@@ -176,11 +274,15 @@ class PlatformSerializer(
         write_only=True,
     )
 
-    knowledge_areas = serializers.PrimaryKeyRelatedField(
-        many=True,
-        queryset=KnowledgeArea.objects.all(),
-        required=False,
-        write_only=True,
+    # Las áreas no son un dato de entrada. Se calculan a partir de los
+    # programas académicos y se exponen únicamente en la representación.
+    knowledge_areas = serializers.ListField(
+        child=serializers.IntegerField(),
+        read_only=True,
+        help_text=(
+            "Áreas del conocimiento derivadas automáticamente de los "
+            "programas académicos asociados."
+        ),
     )
 
     material_types = serializers.PrimaryKeyRelatedField(
@@ -227,10 +329,130 @@ class PlatformSerializer(
             "status",
             "validated_by",
             "validated_at",
+            "knowledge_areas",
         ]
 
+    def validate_base_api_url(self, value):
+        """Normaliza una URL base vacía a ``None``."""
+        if value == "":
+            return None
+
+        return value
+
+    def validate_api_key(self, value):
+        """Normaliza una API Key vacía a ``None``."""
+        if value == "":
+            return None
+
+        return value
+
+    def validate(self, attrs):
+        """
+        Valida las reglas de configuración de la cosecha.
+
+        - Una plataforma puede existir sin API Key.
+        - Una plataforma puede existir sin base_api_url si solo funciona
+        como referencia pública.
+        - Nunca se permite conservar/configurar una API Key sin una
+        base_api_url correspondiente.
+        - Las knowledge_areas se derivan automáticamente de los
+        academic_programs.
+        """
+        attrs = super().validate(attrs)
+
+        instance = self.instance
+
+        if "base_api_url" in attrs:
+            effective_base_api_url = attrs["base_api_url"]
+        elif instance is not None:
+            effective_base_api_url = instance.base_api_url
+        else:
+            effective_base_api_url = None
+
+        if "api_key" in attrs:
+            effective_api_key = attrs["api_key"]
+            has_api_key = bool(effective_api_key)
+        elif instance is not None:
+            has_api_key = bool(instance.encrypted_api_key)
+        else:
+            has_api_key = False
+
+        if has_api_key and not effective_base_api_url:
+            raise serializers.ValidationError(
+                {
+                    "base_api_url": (
+                        "No se puede configurar una API Key sin una URL base "
+                        "de la API (base_api_url)."
+                    )
+                }
+            )
+
+        return attrs
+
+    def _get_knowledge_areas_from_programs(self, programs):
+        """
+        Obtiene las áreas del conocimiento asociadas a los programas
+        académicos seleccionados.
+
+        La relación se determina exclusivamente mediante
+        SharedAcademicProgramKnowledgeArea, respetando el borrado lógico
+        tanto de la relación como del área de conocimiento.
+        """
+        program_ids = {
+            program.pk
+            for program in programs
+        }
+
+        if not program_ids:
+            return []
+
+        knowledge_area_ids = (
+            SharedAcademicProgramKnowledgeArea.objects.filter(
+                academic_program_id__in=program_ids,
+                deleted_at__isnull=True,
+                knowledge_area__deleted_at__isnull=True,
+            )
+            .values_list(
+                "knowledge_area_id",
+                flat=True,
+            )
+            .distinct()
+        )
+
+        return list(
+            KnowledgeArea.objects.filter(
+                pk__in=knowledge_area_ids,
+                deleted_at__isnull=True,
+            )
+        )
+
+    def _prepare_relation_data(self, validated_data):
+        """
+        Extrae las relaciones recibidas y deriva las knowledge_areas
+        cuando el cliente ha enviado academic_programs.
+
+        Si academic_programs no fue enviado, las relaciones existentes
+        no se modifican.
+        """
+        relation_data = self._extract_relation_data(
+            validated_data
+        )
+
+        if "academic_programs" in relation_data:
+            programs = relation_data["academic_programs"]
+
+            relation_data["knowledge_areas"] = (
+                self._get_knowledge_areas_from_programs(
+                    programs
+                )
+            )
+
+        return relation_data
+
     def to_representation(self, instance):
-        representation = super().to_representation(instance)
+        representation = super().to_representation(
+            instance
+        )
 
         return self._represent_relations(
             instance=instance,
@@ -244,7 +466,7 @@ class PlatformSerializer(
             None,
         )
 
-        relation_data = self._extract_relation_data(
+        relation_data = self._prepare_relation_data(
             validated_data
         )
 
@@ -302,12 +524,14 @@ class PlatformSerializer(
         instance,
         validated_data,
     ):
+        api_key_was_sent = "api_key" in validated_data
+
         raw_api_key = validated_data.pop(
             "api_key",
             None,
         )
 
-        relation_data = self._extract_relation_data(
+        relation_data = self._prepare_relation_data(
             validated_data
         )
 
@@ -316,7 +540,7 @@ class PlatformSerializer(
             validated_data,
         )
 
-        if raw_api_key is not None:
+        if api_key_was_sent:
             platform.set_api_key(
                 raw_api_key
             )
@@ -392,9 +616,18 @@ class PlatformPublicAcademicProgramSchemaSerializer(
 class PlatformPublicLinkStatusSchemaSerializer(
     serializers.Serializer,
 ):
+    url = serializers.URLField(
+        allow_null=True,
+        help_text=(
+            "URL pública de la plataforma registrada "
+            "en el último chequeo."
+        ),
+    )
+
     is_active = serializers.BooleanField(
         allow_null=True,
     )
+
     last_check = serializers.DateTimeField(
         allow_null=True,
     )
@@ -542,12 +775,13 @@ class PlatformPublicSerializer(
 
         if latest_log:
             return {
+                "url": latest_log.url,
                 "is_active": latest_log.is_active,
                 "last_check": latest_log.last_check,
             }
 
         return {
+            "url": None,
             "is_active": None,
             "last_check": None,
         }
-        
