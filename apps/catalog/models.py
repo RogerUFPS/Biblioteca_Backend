@@ -149,6 +149,7 @@ class SharedAcademicProgramKnowledgeArea(AuditableModel):
     )
 
     class Meta:
+        ordering = ["academic_program_id", "knowledge_area_id", "id"]
         constraints = [
             models.UniqueConstraint(
                 fields=["knowledge_area", "academic_program"],

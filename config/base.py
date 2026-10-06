@@ -9,6 +9,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    "rest_framework",
+    "django_filters",
+    "drf_spectacular",
+    "apps.core",
+    "apps.account",
+    "apps.catalog",
+    "apps.platforms",
+    "apps.journal",
 ]
 
 MIDDLEWARE = [
@@ -20,8 +28,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
-
-ROOT_URLCONF = 'project.urls'
 
 TEMPLATES = [
     {
@@ -37,6 +43,30 @@ TEMPLATES = [
         },
     },
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
+    "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.CustomPageNumberPagination",
+    "PAGE_SIZE": 10,
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "RABD-2026 API",
+    "DESCRIPTION": (
+        "API del proyecto Repositorio y Agente Orientador "
+        "de Bases de Datos de Acceso Abierto."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+}
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'

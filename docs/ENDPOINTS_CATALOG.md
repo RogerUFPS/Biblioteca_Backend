@@ -62,8 +62,7 @@ JSON y pulsa **Execute**.
 | Tipos de material | `/api/catalog/material-types/` | `name` |
 | Editoriales | `/api/catalog/editorials/` | `name` |
 | Áreas de conocimiento | `/api/catalog/knowledge-areas/` | `name` |
-| Programas académicos | `/api/catalog/academic-programs/` | `name` |
-| Programa-área | `/api/catalog/academic-program-knowledge-areas/` | `knowledge_area`, `academic_program` |
+| Programas académicos | `/api/catalog/academic-programs/` | `name`, `knowledge_areas` (obligatorio al crear) |
 
 Los campos de auditoría son siempre de solo lectura:
 
@@ -86,13 +85,33 @@ Para cada recurso, `{recurso}` representa una ruta base de la tabla anterior.
 | GET | `/api/catalog/{recurso}/` | Listar registros activos | 200 |
 | POST | `/api/catalog/{recurso}/` | Crear un registro | 201 |
 | GET | `/api/catalog/{recurso}/{id}/` | Consultar un registro | 200 |
+| GET | `/api/catalog/{recurso}/archived/` | Listar registros eliminados | 200 |
 | PUT | `/api/catalog/{recurso}/{id}/` | Reemplazar un registro | 200 |
 | PATCH | `/api/catalog/{recurso}/{id}/` | Actualizar parcialmente | 200 |
-| DELETE | `/api/catalog/{recurso}/{id}/` | Borrado lógico | 204 |
+| DELETE | `/api/catalog/{recurso}/{id}/` | Borrado permanente o lógico según relaciones | 204/200 |
 | POST | `/api/catalog/{recurso}/{id}/restore/` | Restaurar un registro eliminado | 200 |
 
 Los listados no muestran registros eliminados. Un `GET` sobre un registro
 eliminado responde 404.
+
+Si el registro no tiene relaciones de negocio, `DELETE` lo elimina
+permanentemente y responde `204 No Content`. Si otros elementos dependen de él,
+se aplica borrado lógico y responde `200 OK` con un aviso; el registro queda
+desactivado y puede restaurarse.
+
+Para listar únicamente los registros eliminados, utiliza el endpoint
+`/archived/`. Por ejemplo:
+
+```text
+GET /api/catalog/editorials/archived/
+```
+
+Este endpoint conserva la paginación y muestra los campos de auditoría del
+borrado. La restauración continúa realizándose con:
+
+```text
+POST /api/catalog/editorials/{id}/restore/
+```
 
 ## 6. Ejemplos con `curl`
 
@@ -141,6 +160,15 @@ La respuesta de listado usa paginación:
 }
 ```
 
+Cada página contiene siempre como máximo 10 elementos. Para solicitar otra
+página utiliza el parámetro `page`:
+
+```text
+GET /api/catalog/languages/?page=2
+```
+
+La respuesta incluye `count`, `next`, `previous` y `results`.
+
 ### 6.3 Consultar un registro
 
 ```bash
@@ -165,30 +193,37 @@ curl -X POST http://localhost:8000/api/catalog/countries/ \
   -d "{\"name\":\"Colombia\",\"abbreviation\":\"CO\",\"emoji_flag\":\"🇨🇴\"}"
 ```
 
-### 6.6 Crear una relación programa-área
+### 6.6 Crear un programa con sus áreas
 
-Primero se necesitan los IDs de un programa y un área:
+Primero se crea el área:
 
 ```bash
-curl -X POST http://localhost:8000/api/catalog/academic-programs/ \
-  -H "Content-Type: application/json" \
-  -d "{\"name\":\"Ingeniería de Sistemas\"}"
-
 curl -X POST http://localhost:8000/api/catalog/knowledge-areas/ \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"Ingeniería\"}"
 ```
 
-Después se crea la relación:
+Luego se crea el programa enviando las áreas obligatoriamente:
 
 ```bash
-curl -X POST \
-  http://localhost:8000/api/catalog/academic-program-knowledge-areas/ \
+curl -X POST http://localhost:8000/api/catalog/academic-programs/ \
   -H "Content-Type: application/json" \
-  -d "{\"academic_program\":1,\"knowledge_area\":1}"
+  -d "{\"name\":\"Ingeniería de Sistemas\",\"knowledge_areas\":[1]}"
 ```
 
-El mismo par de IDs no se puede registrar dos veces.
+Las áreas de un programa se consultan así:
+
+```text
+GET /api/catalog/academic-programs/1/knowledge-areas/
+```
+
+Los programas que cubren un área se consultan así:
+
+```text
+GET /api/catalog/knowledge-areas/1/academic-programs/
+```
+
+La tabla intermedia no tiene un endpoint CRUD público.
 
 ## 7. Borrado lógico y restauración
 
