@@ -18,7 +18,13 @@ ALLOWED_HOSTS = [
     for host in os.getenv("ALLOWED_HOSTS", "localhost").split(",")
     if host.strip()
 ]
-CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW")
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
+CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW", False)
 
 if os.getenv("DJANGO_TESTING", "").lower() in {"1", "true", "yes", "on"}:
     DATABASES = {
