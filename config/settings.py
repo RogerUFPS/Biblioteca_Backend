@@ -15,9 +15,10 @@ ASGI_APPLICATION = "project.asgi.application"
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost").split(",")
+    for host in os.getenv("ALLOWED_HOSTS").split(",")
     if host.strip()
 ]
+CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW")
 
 if os.getenv("DJANGO_TESTING", "").lower() in {"1", "true", "yes", "on"}:
     DATABASES = {
