@@ -1,0 +1,788 @@
+from typing import Any
+
+from rest_framework.test import APITestCase
+
+from apps.account.models import User
+from apps.catalog.models import (
+    AcademicProgram,
+    Country,
+    Editorial,
+    KnowledgeArea,
+    Language,
+    MaterialType,
+)
+from apps.journal import models
+from apps.platforms.models import Platform
+
+
+class JournalAPITests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.system = User.objects.create_user(
+            code=0,
+            full_name="Sistema",
+            email="sistema@test.local",
+        )
+
+        cls.editorial = Editorial.objects.create(
+            name="Nature Publishing",
+            created_by=cls.system,
+        )
+
+        cls.language = Language.objects.create(
+            name="Español",
+            abbreviation="es",
+            created_by=cls.system,
+        )
+
+        cls.country = Country.objects.create(
+            name="Colombia",
+            abbreviation="co",
+            emoji_flag="🇨🇴",
+            created_by=cls.system,
+        )
+
+        cls.knowledge_area = KnowledgeArea.objects.create(
+            name="Ciencias Naturales",
+            created_by=cls.system,
+        )
+
+        cls.material_type = MaterialType.objects.create(
+            name="Artículos",
+            created_by=cls.system,
+        )
+
+        cls.academic_program = AcademicProgram.objects.create(
+            name="Biología",
+            created_by=cls.system,
+        )
+
+        cls.platform = Platform.objects.create(
+            name="Scopus API Test",
+            base_api_url="https://api.scopus.test",
+            status=Platform.Status.PUBLICADO,
+            created_by=cls.system,
+        )
+
+    def _get_data(
+        self,
+        response: Any,
+    ) -> dict[str, Any]:
+        return getattr(response, "data", {})
+
+    def _create_journal(
+        self,
+        *,
+        issn="1234-5678",
+        title="Journal API Test",
+        active=True,
+        validated=False,
+    ):
+        journal = models.Journal.objects.create(
+            issn=issn,
+            title=title,
+            editorial=self.editorial,
+            active=active,
+            created_by=self.system,
+        )
+
+        if validated:
+            journal.validated_by = self.system
+            journal.validated_at = journal.created_at
+            journal.save(
+                update_fields=[
+                    "validated_by",
+                    "validated_at",
+                ]
+            )
+
+        return journal
+
+    # ==========================================================================
+    # CRUD ADMINISTRATIVO
+    # ==========================================================================
+
+    def test_create_journal_endpoint(self):
+        """
+        POST /api/journals/ crea una revista correctamente.
+        """
+        response = self.client.post(
+            "/api/journals/",
+            {
+                "issn": "1476 4687",
+                "title": "Nature",
+                "editorial": self.editorial.pk,
+                "license": "CC BY",
+                "has_apc": False,
+                "start_period": "1869-01-01",
+            },
+            format="json",
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            201,
+        )
+
+        self.assertEqual(
+            data["issn"],
+            "1476-4687",
+        )
+
+        self.assertEqual(
+            data["title"],
+            "Nature",
+        )
+
+        self.assertIn(
+            "created_by",
+            data,
+        )
+
+        self.assertEqual(
+            data["created_by"],
+            self.system.pk,
+        )
+
+    def test_list_journals_returns_active_journals(self):
+        """
+        GET /api/journals/ lista las revistas no eliminadas.
+        """
+        journal_a = self._create_journal(
+            issn="1111-1111",
+            title="Journal A",
+        )
+
+        journal_b = self._create_journal(
+            issn="2222-2222",
+            title="Journal B",
+        )
+
+        archived = self._create_journal(
+            issn="3333-3333",
+            title="Journal Archived",
+        )
+
+        archived.soft_delete(
+            user=self.system,
+            explanation="Archivada para prueba",
+        )
+
+        response = self.client.get(
+            "/api/journals/"
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            journal_a.pk,
+            ids,
+        )
+
+        self.assertIn(
+            journal_b.pk,
+            ids,
+        )
+
+        self.assertNotIn(
+            archived.pk,
+            ids,
+        )
+
+    # ==========================================================================
+    # PUBLICACIÓN
+    # ==========================================================================
+
+    def test_publish_action_endpoint(self):
+        """
+        POST /api/journals/{id}/publish/
+        activa y valida la revista.
+        """
+        journal = self._create_journal(
+            issn="4444-4444",
+            title="Journal Publish",
+            active=False,
+            validated=False,
+        )
+
+        response = self.client.post(
+            f"/api/journals/{journal.pk}/publish/",
+            {},
+            format="json",
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        journal.refresh_from_db()
+
+        self.assertTrue(
+            journal.active
+        )
+
+        self.assertEqual(
+            journal.validated_by_id,
+            self.system.pk,
+        )
+
+        self.assertIsNotNone(
+            journal.validated_at
+        )
+
+        self.assertEqual(
+            data["id"],
+            journal.pk,
+        )
+
+    def test_deactivate_action_endpoint(self):
+        """
+        POST /api/journals/{id}/deactivate/
+        desactiva una revista.
+        """
+        journal = self._create_journal(
+            issn="5555-5555",
+            title="Journal Deactivate",
+            active=True,
+            validated=True,
+        )
+
+        response = self.client.post(
+            f"/api/journals/{journal.pk}/deactivate/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        journal.refresh_from_db()
+
+        self.assertFalse(
+            journal.active
+        )
+
+        self.assertEqual(
+            journal.validated_by_id,
+            self.system.pk,
+        )
+
+    # ==========================================================================
+    # SOFT DELETE / ARCHIVED / RESTORE
+    # ==========================================================================
+
+    def test_destroy_with_business_relation_soft_deletes_journal(self):
+        """
+        Una revista con relaciones de negocio se elimina mediante
+        Soft Delete y requiere explicación.
+        """
+        journal = self._create_journal(
+            issn="6666-6666",
+            title="Journal Delete",
+        )
+
+        models.SharedJournalKnowledgeArea.objects.create(
+            journal=journal,
+            knowledge_area=self.knowledge_area,
+            created_by=self.system,
+        )
+
+        response = self.client.delete(
+            f"/api/journals/{journal.pk}/",
+            {
+                "delete_explanation": (
+                    "Eliminación lógica para prueba."
+                )
+            },
+            format="json",
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.assertFalse(
+            models.Journal.objects.filter(
+                pk=journal.pk
+            ).exists()
+        )
+
+        self.assertTrue(
+            models.Journal.all_objects.filter(
+                pk=journal.pk
+            ).exists()
+        )
+
+        self.assertEqual(
+            data["permanent"],
+            False,
+        )
+
+    def test_archived_endpoint_returns_deleted_journals(self):
+        """
+        GET /api/journals/archived/
+        devuelve revistas eliminadas.
+        """
+        journal = self._create_journal(
+            issn="7777-7777",
+            title="Journal Archived API",
+        )
+
+        journal.soft_delete(
+            user=self.system,
+            explanation="Test archivado",
+        )
+
+        response = self.client.get(
+            "/api/journals/archived/"
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        archived_ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            journal.pk,
+            archived_ids,
+        )
+
+    def test_restore_action_endpoint(self):
+        """
+        POST /api/journals/{id}/restore/
+        restaura una revista eliminada y limpia su validación.
+        """
+        journal = self._create_journal(
+            issn="8888-8888",
+            title="Journal Restore API",
+            active=True,
+            validated=True,
+        )
+
+        journal.soft_delete(
+            user=self.system,
+            explanation="Eliminada para restauración.",
+        )
+
+        response = self.client.post(
+            f"/api/journals/{journal.pk}/restore/",
+            {},
+            format="json",
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        journal.refresh_from_db()
+
+        self.assertFalse(
+            journal.is_deleted
+        )
+
+        self.assertIsNone(
+            journal.validated_by
+        )
+
+        self.assertIsNone(
+            journal.validated_at
+        )
+
+        self.assertEqual(
+            data["id"],
+            journal.pk,
+        )
+
+    def test_restore_nonexistent_archived_journal_returns_404(self):
+        """
+        Restaurar una revista inexistente debe devolver 404.
+        """
+        response = self.client.post(
+            "/api/journals/999999/restore/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            404,
+        )
+
+    # ==========================================================================
+    # API PÚBLICA
+    # ==========================================================================
+
+    def test_public_endpoint_lists_only_active_validated_journals(self):
+        """
+        GET /api/journals/public/ solamente expone revistas
+        activas y validadas.
+        """
+        public_journal = self._create_journal(
+            issn="1010-1010",
+            title="Public Journal",
+            active=True,
+            validated=True,
+        )
+
+        inactive_journal = self._create_journal(
+            issn="2020-2020",
+            title="Inactive Journal",
+            active=False,
+            validated=True,
+        )
+
+        unvalidated_journal = self._create_journal(
+            issn="3030-3030",
+            title="Unvalidated Journal",
+            active=True,
+            validated=False,
+        )
+
+        response = self.client.get(
+            "/api/journals/public/"
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            public_journal.pk,
+            ids,
+        )
+
+        self.assertNotIn(
+            inactive_journal.pk,
+            ids,
+        )
+
+        self.assertNotIn(
+            unvalidated_journal.pk,
+            ids,
+        )
+
+    def test_public_endpoint_excludes_soft_deleted_journals(self):
+        """
+        Una revista eliminada no aparece en la API pública.
+        """
+        journal = self._create_journal(
+            issn="4040-4040",
+            title="Deleted Public Journal",
+            active=True,
+            validated=True,
+        )
+
+        journal.soft_delete(
+            user=self.system,
+            explanation="Eliminada para prueba",
+        )
+
+        response = self.client.get(
+            "/api/journals/public/"
+        )
+
+        data = self._get_data(response)
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertNotIn(
+            journal.pk,
+            ids,
+        )
+
+    # ==========================================================================
+    # FILTROS PÚBLICOS
+    # ==========================================================================
+
+    def test_public_filter_by_knowledge_area(self):
+        """
+        Filtra revistas públicas por área del conocimiento.
+        """
+        journal = self._create_journal(
+            issn="5050-5050",
+            title="Knowledge Area Journal",
+            validated=True,
+        )
+
+        models.SharedJournalKnowledgeArea.objects.create(
+            journal=journal,
+            knowledge_area=self.knowledge_area,
+            created_by=self.system,
+        )
+
+        response = self.client.get(
+            "/api/journals/public/",
+            {
+                "knowledge_area": self.knowledge_area.pk,
+            },
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            journal.pk,
+            ids,
+        )
+
+    def test_public_filter_by_country(self):
+        """
+        Filtra revistas públicas por país.
+        """
+        journal = self._create_journal(
+            issn="6060-6060",
+            title="Country Journal",
+            validated=True,
+        )
+
+        models.SharedJournalCountry.objects.create(
+            journal=journal,
+            country=self.country,
+            created_by=self.system,
+        )
+
+        response = self.client.get(
+            "/api/journals/public/",
+            {
+                "country": self.country.pk,
+            },
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            journal.pk,
+            ids,
+        )
+
+    def test_public_filter_by_language(self):
+        """
+        Filtra revistas públicas por idioma.
+        """
+        journal = self._create_journal(
+            issn="7070-7070",
+            title="Language Journal",
+            validated=True,
+        )
+
+        models.SharedJournalLanguage.objects.create(
+            journal=journal,
+            language=self.language,
+            created_by=self.system,
+        )
+
+        response = self.client.get(
+            "/api/journals/public/",
+            {
+                "language": self.language.pk,
+            },
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            journal.pk,
+            ids,
+        )
+
+    def test_public_filter_by_platform(self):
+        """
+        Filtra revistas públicas por plataforma.
+        """
+        journal = self._create_journal(
+            issn="8080-8080",
+            title="Platform Journal",
+            validated=True,
+        )
+
+        models.SharedJournalPlatform.objects.create(
+            journal=journal,
+            platform=self.platform,
+            created_by=self.system,
+        )
+
+        response = self.client.get(
+            "/api/journals/public/",
+            {
+                "platform": self.platform.pk,
+            },
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            journal.pk,
+            ids,
+        )
+
+    def test_public_filter_by_title(self):
+        """
+        Filtra revistas públicas por coincidencia parcial del título.
+        """
+        journal = self._create_journal(
+            issn="9090-9090",
+            title="International Journal of Biology",
+            validated=True,
+        )
+
+        response = self.client.get(
+            "/api/journals/public/",
+            {
+                "title": "Biology",
+            },
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            journal.pk,
+            ids,
+        )
+
+    def test_public_filter_by_issn_without_hyphen(self):
+        """
+        El filtro ISSN acepta el valor con o sin guion.
+        """
+        journal = self._create_journal(
+            issn="1234-5678",
+            title="ISSN Filter Journal",
+            validated=True,
+        )
+
+        response = self.client.get(
+            "/api/journals/public/",
+            {
+                "issn": "12345678",
+            },
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        ids = [
+            item["id"]
+            for item in data["results"]
+        ]
+
+        self.assertIn(
+            journal.pk,
+            ids,
+        )
+
+    def test_public_filter_with_nonexistent_knowledge_area_returns_empty(self):
+        """
+        Un área del conocimiento inexistente no genera error
+        y retorna cero resultados.
+        """
+        response = self.client.get(
+            "/api/journals/public/",
+            {
+                "knowledge_area": 999999,
+            },
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.assertEqual(
+            data["total_items"],
+            0,
+        )
