@@ -138,6 +138,7 @@ class ValidSintaxisSerializer(
             }
         }
 
+    @extend_schema_field(serializers.DictField(child=serializers.CharField()))
     def get_fields_template(self, obj):
         return {key: "" for key in VALID_SINTAXIS_FIELD_KEYS}
 
