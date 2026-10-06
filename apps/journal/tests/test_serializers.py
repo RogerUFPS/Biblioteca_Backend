@@ -10,6 +10,7 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
+    SharedAcademicProgramKnowledgeArea,
 )
 from apps.journal import models, serializers
 from apps.platforms.models import Platform
@@ -57,6 +58,34 @@ class JournalSerializersTests(TestCase):
             created_by=cls.system,
         )
 
+        cls.knowledge_area_secondary = KnowledgeArea.objects.create(
+            name="Tecnología",
+            created_by=cls.system,
+        )
+
+        cls.academic_program_secondary = AcademicProgram.objects.create(
+            name="Ingeniería Electrónica",
+            created_by=cls.system,
+        )
+
+        SharedAcademicProgramKnowledgeArea.objects.create(
+            academic_program=cls.academic_program,
+            knowledge_area=cls.knowledge_area,
+            created_by=cls.system,
+        )
+
+        SharedAcademicProgramKnowledgeArea.objects.create(
+            academic_program=cls.academic_program_secondary,
+            knowledge_area=cls.knowledge_area,
+            created_by=cls.system,
+        )
+
+        SharedAcademicProgramKnowledgeArea.objects.create(
+            academic_program=cls.academic_program_secondary,
+            knowledge_area=cls.knowledge_area_secondary,
+            created_by=cls.system,
+        )
+
         cls.platform = Platform.objects.create(
             name="Scopus Test",
             base_api_url="https://api.scopus.test",
@@ -94,7 +123,6 @@ class JournalSerializersTests(TestCase):
             "start_period": "2020-01-01",
             "languages": [self.language.pk],
             "countries": [self.country.pk],
-            "knowledge_areas": [self.knowledge_area.pk],
             "material_types": [self.material_type.pk],
             "academic_programs": [
                 self.academic_program.pk
@@ -232,9 +260,9 @@ class JournalSerializersTests(TestCase):
         serializer = serializers.JournalSerializer(
             instance=journal,
             data={
-                "knowledge_areas": [
-                    self.knowledge_area.pk,
-                    self.knowledge_area.pk,
+                "academic_programs": [
+                    self.academic_program.pk,
+                    self.academic_program.pk,
                 ],
                 "languages": [
                     self.language.pk,
@@ -265,6 +293,147 @@ class JournalSerializersTests(TestCase):
                 journal=journal
             ).count(),
             1,
+        )
+
+    def test_knowledge_areas_are_derived_from_academic_programs(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "2345-6789",
+                "title": "Journal Derivación",
+                "academic_programs": [
+                    self.academic_program.pk,
+                    self.academic_program_secondary.pk,
+                ],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        journal = serializer.save(created_by=self.system)
+
+        self.assertEqual(
+            set(
+                journal.knowledge_area_links.values_list(
+                    "knowledge_area_id",
+                    flat=True,
+                )
+            ),
+            {
+                self.knowledge_area.pk,
+                self.knowledge_area_secondary.pk,
+            },
+        )
+
+    def test_knowledge_areas_are_not_writeable(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "3456-7890",
+                "title": "Journal Read Only",
+                "knowledge_areas": [999999],
+                "academic_programs": [self.academic_program.pk],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+
+        self.assertEqual(
+            list(
+                journal.knowledge_area_links.values_list(
+                    "knowledge_area_id",
+                    flat=True,
+                )
+            ),
+            [self.knowledge_area.pk],
+        )
+
+    def test_patch_without_academic_programs_preserves_derived_relations(self):
+        journal = self._journal(
+            issn="4567-8901",
+            title="Journal Preserve",
+        )
+
+        serializer = serializers.JournalSerializer(
+            instance=journal,
+            data={"academic_programs": [self.academic_program.pk]},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(updated_by=self.system)
+
+        serializer = serializers.JournalSerializer(
+            instance=journal,
+            data={"title": "Journal Preserve Updated"},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(updated_by=self.system)
+
+        self.assertEqual(journal.academic_program_links.count(), 1)
+        self.assertEqual(journal.knowledge_area_links.count(), 1)
+
+    def test_empty_academic_programs_clears_derived_knowledge_areas(self):
+        journal = self._journal(
+            issn="5678-9012",
+            title="Journal Clear",
+        )
+
+        serializer = serializers.JournalSerializer(
+            instance=journal,
+            data={"academic_programs": [self.academic_program.pk]},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(updated_by=self.system)
+
+        serializer = serializers.JournalSerializer(
+            instance=journal,
+            data={"academic_programs": []},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(updated_by=self.system)
+
+        self.assertEqual(journal.academic_program_links.count(), 0)
+        self.assertEqual(journal.knowledge_area_links.count(), 0)
+
+    def test_changing_academic_programs_recalculates_knowledge_areas(self):
+        journal = self._journal(
+            issn="5789-0123",
+            title="Journal Recalculate",
+        )
+
+        serializer = serializers.JournalSerializer(
+            instance=journal,
+            data={"academic_programs": [self.academic_program.pk]},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(updated_by=self.system)
+
+        serializer = serializers.JournalSerializer(
+            instance=journal,
+            data={
+                "academic_programs": [
+                    self.academic_program_secondary.pk,
+                ]
+            },
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(updated_by=self.system)
+
+        self.assertEqual(
+            set(
+                journal.knowledge_area_links.values_list(
+                    "knowledge_area_id",
+                    flat=True,
+                )
+            ),
+            {
+                self.knowledge_area.pk,
+                self.knowledge_area_secondary.pk,
+            },
         )
 
     def test_removed_relations_are_soft_deleted_and_hidden(self):
@@ -641,6 +810,53 @@ class JournalSerializersTests(TestCase):
             "platforms",
             serializer.errors,
         )
+
+    def test_platform_relation_rejects_draft_platform(self):
+        draft_platform = Platform.objects.create(
+            name="Draft Association",
+            status=Platform.Status.BORRADOR,
+            created_by=self.system,
+        )
+
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "6789-0123",
+                "title": "Draft Association Journal",
+                "platforms": [{"platform": draft_platform.pk}],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("platforms", serializer.errors)
+
+    def test_platform_relation_rejects_obsolete_platform(self):
+        obsolete_platform = Platform.objects.create(
+            name="Obsolete Association",
+            status=Platform.Status.OBSOLETO,
+            created_by=self.system,
+        )
+
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "7890-1234",
+                "title": "Obsolete Association Journal",
+                "platforms": [{"platform": obsolete_platform.pk}],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("platforms", serializer.errors)
+
+    def test_platform_relation_allows_published_platform(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "8901-2345",
+                "title": "Published Association Journal",
+                "platforms": [{"platform": self.platform.pk}],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
 
     # ==========================================================================
     # RESTAURACIÓN DE JOURNAL

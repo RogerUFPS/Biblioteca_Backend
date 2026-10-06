@@ -11,6 +11,7 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
+    SharedAcademicProgramKnowledgeArea,
 )
 from apps.journal import models, services
 from apps.platforms.models import Platform
@@ -59,6 +60,12 @@ class JournalServicesTests(TestCase):
             created_by=cls.system,
         )
 
+        SharedAcademicProgramKnowledgeArea.objects.create(
+            academic_program=cls.academic_program,
+            knowledge_area=cls.knowledge_area,
+            created_by=cls.system,
+        )
+
         cls.platform = Platform.objects.create(
             name="Scopus Test",
             base_api_url="https://api.scopus.test",
@@ -84,7 +91,6 @@ class JournalServicesTests(TestCase):
             start_period=date(2020, 1, 1),
             language_ids=[self.language.pk],
             country_ids=[self.country.pk],
-            knowledge_area_ids=[self.knowledge_area.pk],
             material_type_ids=[self.material_type.pk],
             academic_program_ids=[
                 self.academic_program.pk
@@ -332,9 +338,6 @@ class JournalServicesTests(TestCase):
             country_ids=[
                 self.country.pk
             ],
-            knowledge_area_ids=[
-                self.knowledge_area.pk
-            ],
             material_type_ids=[
                 self.material_type.pk
             ],
@@ -368,6 +371,42 @@ class JournalServicesTests(TestCase):
             journal.academic_program_links.count(),
             1,
         )
+
+    def test_create_journal_derives_knowledge_areas_from_academic_programs(self):
+        journal = services.create_journal(
+            issn="6767-8989",
+            title="Journal Derivación",
+            academic_program_ids=[self.academic_program.pk],
+            user=self.system,
+        )
+
+        self.assertEqual(
+            list(
+                journal.knowledge_area_links.values_list(
+                    "knowledge_area_id",
+                    flat=True,
+                )
+            ),
+            [self.knowledge_area.pk],
+        )
+
+    def test_empty_academic_programs_clears_derived_knowledge_areas(self):
+        journal = services.create_journal(
+            issn="6969-0101",
+            title="Journal Clear Derived",
+            academic_program_ids=[self.academic_program.pk],
+            user=self.system,
+        )
+
+        services.create_journal(
+            issn="6969-0101",
+            title="Journal Clear Derived",
+            academic_program_ids=[],
+            user=self.system,
+        )
+
+        self.assertEqual(journal.academic_program_links.count(), 0)
+        self.assertEqual(journal.knowledge_area_links.count(), 0)
 
     def test_create_journal_deduplicates_relation_ids(self):
         """
@@ -689,3 +728,37 @@ class JournalServicesTests(TestCase):
             "platform_id",
             context.exception.detail,
         )
+
+    def test_source_platform_rejects_draft_platform(self):
+        draft_platform = Platform.objects.create(
+            name="Draft Source Platform",
+            status=Platform.Status.BORRADOR,
+            created_by=self.system,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            services.create_journal(
+                issn="7070-1212",
+                title="Journal Draft Platform",
+                platform_id=draft_platform.pk,
+                user=self.system,
+            )
+
+        self.assertIn("platform_id", context.exception.detail)
+
+    def test_source_platform_rejects_obsolete_platform(self):
+        obsolete_platform = Platform.objects.create(
+            name="Obsolete Source Platform",
+            status=Platform.Status.OBSOLETO,
+            created_by=self.system,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            services.create_journal(
+                issn="7171-2323",
+                title="Journal Obsolete Platform",
+                platform_id=obsolete_platform.pk,
+                user=self.system,
+            )
+
+        self.assertIn("platform_id", context.exception.detail)
