@@ -17,6 +17,7 @@ INSTALLED_APPS = [
     "apps.catalog",
     "apps.platforms",
     "apps.journal",
+    "apps.harvesting",
 ]
 
 MIDDLEWARE = [

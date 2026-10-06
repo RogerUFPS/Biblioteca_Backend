@@ -1,6 +1,17 @@
 from rest_framework import serializers
-from apps.core.viewset import ArchivedNameMixin
+from apps.core.viewsets import ArchivedNameMixin
 from . import models
+
+AUDIT_FIELDS = (
+    "id",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "deleted_by",
+    "deleted_at",
+    "delete_explanation",
+)
 
 class ScheduleSerializer(ArchivedNameMixin, serializers.ModelSerializer):
 
@@ -8,11 +19,10 @@ class ScheduleSerializer(ArchivedNameMixin, serializers.ModelSerializer):
         fields = [
             *AUDIT_FIELDS,
             "frequency",
-            "duration",
             "start_date",
             "finish_date",
         ],
-        read_only_fields = AUDIT_FIELDS
+        read_only_fields = [AUDIT_FIELDS, "duration"]
 
     def validate(self, attrs):
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
@@ -68,5 +78,21 @@ class HarvestSerializer(ArchivedNameMixin, serializers.ModelSerializer):
             "records_updated",
             "records_failed",
         ]
+        read_only_fields = [AUDIT_FIELDS, "api_cursor", "records_added", "records_updated", "records_failed", "state"]
 
-        read_only_fields = AUDIT_FIELDS
+    def vaildate(self, attrs): 
+            if max_quantity is None and stop_after_minutes is None:
+                raise serializers.ValidationError(
+                    {"Necesitas definiir la cantidad maxima o el tiempo maximo de cosecha"}
+                )
+            if max_quantity >= 0 or stop_after_minutes >= 0:
+                raise  serializers.ValidationError(
+                    {"Tienes que definir limites mayores a 0, o la cosecha acabara inmediatamente."}
+                )
+
+            if records_added < 0 or records_updated < 0 or records_failed < 0:
+                raise serializers.ValidationError(
+                    {"Los registros agregados no pueden ser menores que 0."}
+                )
+
+            return attrs
