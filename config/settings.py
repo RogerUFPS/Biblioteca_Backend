@@ -15,7 +15,7 @@ ASGI_APPLICATION = "project.asgi.application"
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv("ALLOWED_HOSTS").split(",")
+    for host in os.getenv("ALLOWED_HOSTS", "localhost").split(",")
     if host.strip()
 ]
 CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW")
