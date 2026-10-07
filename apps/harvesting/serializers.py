@@ -1,4 +1,5 @@
 from rest_framework import serializers
+<<<<<<< HEAD
 from apps.core.viewsets import ArchivedNameMixin
 from . import models
 
@@ -13,16 +14,29 @@ AUDIT_FIELDS = (
     "delete_explanation",
 )
 
+=======
+from apps.core.viewset import ArchivedNameMixin
+from . import models
+
+>>>>>>> production
 class ScheduleSerializer(ArchivedNameMixin, serializers.ModelSerializer):
 
     class Meta:
         fields = [
             *AUDIT_FIELDS,
             "frequency",
+<<<<<<< HEAD
             "start_date",
             "finish_date",
         ],
         read_only_fields = [AUDIT_FIELDS, "duration"]
+=======
+            "duration",
+            "start_date",
+            "finish_date",
+        ],
+        read_only_fields = AUDIT_FIELDS
+>>>>>>> production
 
     def validate(self, attrs):
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
@@ -78,6 +92,7 @@ class HarvestSerializer(ArchivedNameMixin, serializers.ModelSerializer):
             "records_updated",
             "records_failed",
         ]
+<<<<<<< HEAD
         read_only_fields = [AUDIT_FIELDS, "api_cursor", "records_added", "records_updated", "records_failed", "state"]
 
     def vaildate(self, attrs): 
@@ -96,3 +111,7 @@ class HarvestSerializer(ArchivedNameMixin, serializers.ModelSerializer):
                 )
 
             return attrs
+=======
+
+        read_only_fields = AUDIT_FIELDS
+>>>>>>> production
