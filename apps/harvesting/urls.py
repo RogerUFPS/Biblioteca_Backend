@@ -4,15 +4,15 @@ from . import views
 router = DefaultRouter()
 
 router.register(
-        "",
-        views.ScheduleViewSet,
-        basename="Schedule",
+    r"schedules",
+    views.ScheduleViewSet,
+    basename="schedule",
 )
 
 router.register(
-        "",
-        views.HarvestViewSet,
-        basename="Harvest",
+    r"harvests",
+    views.HarvestViewSet,
+    basename="harvest",
 )
 
-urlpatters = router.urls
+urlpatterns = router.urls
