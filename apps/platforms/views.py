@@ -372,10 +372,24 @@ class PlatformViewSet(AuditableViewSet):
     @extend_schema(
         summary="Verificar enlace de plataforma",
         description=(
-            "Realiza una verificación del enlace configurado para la "
-            "plataforma y registra el resultado de la comprobación."
+            "Verifica la URL pública de la plataforma y registra el "
+            "resultado de la comprobación. Si se envía una URL, esta "
+            "se registra y verifica. Si no se envía, se utiliza la "
+            "última URL pública registrada para la plataforma."
         ),
-        request=None,
+        request=inline_serializer(
+            name="PlatformLinkCheckRequest",
+            fields={
+                "url": drf_serializers.URLField(
+                    required=False,
+                    allow_null=True,
+                    help_text=(
+                        "URL pública de la plataforma. Si se omite, "
+                        "se utiliza la última URL registrada."
+                    ),
+                ),
+            },
+        ),
         responses={
             200: serializers.LinkCheckLogSerializer,
         },
@@ -390,9 +404,20 @@ class PlatformViewSet(AuditableViewSet):
         instance = self.get_object()
         user = get_acting_user(request)
 
+        url = request.data.get("url")
+
+        if url is not None and not isinstance(url, str):
+            return Response(
+                {
+                    "url": "La URL debe ser una cadena de texto."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         link_log = services.check_platform_link(
             platform=instance,
             user=user,
+            url=url,
         )
 
         return Response(
