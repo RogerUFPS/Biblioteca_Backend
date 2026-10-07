@@ -1,8 +1,9 @@
 from django.db import IntegrityError
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.account.models import User
-from apps.harvesting.models import Harvest, Schedule
+from apps.harvesting.models import Harvest, Schedule, ScheduleEvent
 from apps.platforms.models import Platform
 
 
@@ -22,18 +23,37 @@ class HarvestingModelsTestCase(TestCase):
 
     def test_create_schedule_success(self):
         schedule = Schedule.objects.create(
-            platform=self.platform,
             frequency=Schedule.Frequency.DAILY,
             max_quantity=500,
+            start_date=timezone.now(),
             created_by=self.user,
         )
-        self.assertEqual(schedule.platform, self.platform)
+        schedule.platforms.add(self.platform)
+        self.assertIn(self.platform, schedule.platforms.all())
         self.assertEqual(schedule.frequency, "daily")
-        self.assertIsNone(schedule.start_date)
-        self.assertIsNone(schedule.finish_date)
-        self.assertIsNone(schedule.duration)
+        self.assertIsNotNone(schedule.start_date)
         self.assertFalse(hasattr(schedule, "is_active"))
         self.assertIn("Schedule #", str(schedule))
+
+    def test_schedule_event_is_unique_for_each_scheduled_occurrence(self):
+        schedule = Schedule.objects.create(
+            frequency=Schedule.Frequency.ONCE,
+            max_quantity=500,
+            start_date=timezone.now(),
+            created_by=self.user,
+        )
+        scheduled_for = timezone.now()
+        ScheduleEvent.objects.create(
+            schedule=schedule,
+            scheduled_for=scheduled_for,
+            created_by=self.user,
+        )
+        with self.assertRaises(IntegrityError):
+            ScheduleEvent.objects.create(
+                schedule=schedule,
+                scheduled_for=scheduled_for,
+                created_by=self.user,
+            )
 
     def test_create_harvest_success(self):
         harvest = Harvest.objects.create(

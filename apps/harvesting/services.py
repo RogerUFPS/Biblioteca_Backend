@@ -1,5 +1,6 @@
 import logging
 import time
+import calendar
 from datetime import timedelta
 from typing import Any
 
@@ -15,28 +16,6 @@ from apps.platforms.models import Platform
 from . import models
 
 logger = logging.getLogger(__name__)
-
-
-def record_schedule_harvest_start(harvest: models.Harvest) -> None:
-    """Registra en el Schedule el instante en que arrancó la cosecha asociada."""
-    if not harvest.schedule_id or harvest.started_at is None:
-        return
-    schedule = harvest.schedule
-    schedule.start_date = harvest.started_at
-    schedule.finish_date = None
-    schedule.duration = None
-    schedule.save(update_fields=["start_date", "finish_date", "duration"])
-
-
-def record_schedule_harvest_finish(harvest: models.Harvest) -> None:
-    """Registra en el Schedule el cierre y la duración real de la cosecha asociada."""
-    if not harvest.schedule_id or harvest.started_at is None or harvest.finished_at is None:
-        return
-    schedule = harvest.schedule
-    schedule.start_date = harvest.started_at
-    schedule.finish_date = harvest.finished_at
-    schedule.duration = harvest.finished_at - harvest.started_at
-    schedule.save(update_fields=["start_date", "finish_date", "duration"])
 
 
 def get_latest_cursor_for_platform(platform: Platform) -> str:
@@ -57,6 +36,35 @@ def get_latest_cursor_for_platform(platform: Platform) -> str:
     if latest and latest.api_cursor:
         return latest.api_cursor
     return "*"
+
+
+def _source_has_apc(item: dict[str, Any]) -> bool | None:
+    data_found = False
+    apc_usd = item.get("apc_usd")
+    if apc_usd is not None:
+        try:
+            amount = float(apc_usd)
+            data_found = True
+            if amount > 0:
+                return True
+        except (TypeError, ValueError):
+            logger.warning("Valor apc_usd inválido de OpenAlex: %r", apc_usd)
+
+    prices = item.get("apc_prices")
+    if isinstance(prices, list):
+        for price in prices:
+            if not isinstance(price, dict):
+                continue
+            raw_amount = price.get("price", price.get("amount"))
+            if raw_amount is None:
+                continue
+            try:
+                data_found = True
+                if float(raw_amount) > 0:
+                    return True
+            except (TypeError, ValueError):
+                logger.warning("Precio APC inválido de OpenAlex: %r", raw_amount)
+    return False if data_found else None
 
 
 class OpenAlexHarvester:
@@ -99,17 +107,16 @@ class OpenAlexHarvester:
         """
         Ejecuta el ciclo de recolección para la cosecha configurada.
         """
-        harvest = self.harvest
+        with transaction.atomic():
+            harvest = models.Harvest.objects.select_for_update().get(pk=self.harvest.pk)
+            if harvest.state != models.Harvest.State.PENDING:
+                return harvest
+            harvest.state = models.Harvest.State.RUNNING
+            if harvest.started_at is None:
+                harvest.started_at = timezone.now()
+            harvest.save(update_fields=["state", "started_at"])
+        self.harvest = harvest
         platform = harvest.platform
-
-        # Transición de estado a RUNNING
-        harvest.state = models.Harvest.State.RUNNING
-        is_first_start = harvest.started_at is None
-        if is_first_start:
-            harvest.started_at = timezone.now()
-        harvest.save(update_fields=["state", "started_at"])
-        if is_first_start:
-            record_schedule_harvest_start(harvest)
 
         # Recuperar o establecer cursor
         cursor = harvest.api_cursor or get_latest_cursor_for_platform(platform)
@@ -131,19 +138,26 @@ class OpenAlexHarvester:
                 harvest.refresh_from_db()
                 if harvest.state in [
                     models.Harvest.State.CANCELLED,
+                    models.Harvest.State.PAUSING,
                     models.Harvest.State.PAUSED,
                 ]:
                     logger.info("Cosecha #%s interrumpida con estado: %s", harvest.pk, harvest.state)
                     break
 
                 # Comprobar límite de registros alcanzado
-                total_processed = harvest.records_added + harvest.records_updated
+                total_processed = (
+                    harvest.records_added
+                    + harvest.records_updated
+                    + harvest.records_failed
+                )
                 if harvest.max_quantity and total_processed >= harvest.max_quantity:
                     logger.info("Límite de cantidad alcanzado en cosecha #%s (%s)", harvest.pk, total_processed)
                     break
 
                 # Comprobar límite de tiempo transcurrido
-                elapsed_minutes = (time.monotonic() - start_time) / 60.0
+                elapsed_minutes = (
+                    harvest.elapsed_seconds + time.monotonic() - start_time
+                ) / 60.0
                 if harvest.stop_after_minutes and elapsed_minutes >= harvest.stop_after_minutes:
                     logger.info("Límite de tiempo alcanzado en cosecha #%s (%.2f min)", harvest.pk, elapsed_minutes)
                     break
@@ -175,19 +189,28 @@ class OpenAlexHarvester:
                     logger.info("No se encontraron más resultados para la cosecha #%s.", harvest.pk)
                     break
 
+                page_complete = True
                 for item in results:
                     # Chequeo de límites dentro del lote
-                    current_processed = harvest.records_added + harvest.records_updated
+                    current_processed = (
+                        harvest.records_added
+                        + harvest.records_updated
+                        + harvest.records_failed
+                    )
                     if harvest.max_quantity and current_processed >= harvest.max_quantity:
+                        page_complete = False
                         break
-                    elapsed_batch = (time.monotonic() - start_time) / 60.0
+                    elapsed_batch = (
+                        harvest.elapsed_seconds + time.monotonic() - start_time
+                    ) / 60.0
                     if harvest.stop_after_minutes and elapsed_batch >= harvest.stop_after_minutes:
+                        page_complete = False
                         break
 
                     self._process_single_source(item)
 
                 # Actualizar cursor y métricas de progreso de forma progresiva e inalterable
-                if next_cursor:
+                if page_complete and next_cursor:
                     cursor = next_cursor
                     harvest.api_cursor = next_cursor
 
@@ -200,6 +223,9 @@ class OpenAlexHarvester:
                     ]
                 )
 
+                if not page_complete:
+                    break
+
                 # Si no hay más páginas, finalizar
                 if not next_cursor:
                     break
@@ -207,19 +233,27 @@ class OpenAlexHarvester:
             # Finalización con éxito si no fue cancelada ni pausada.
             # Una pausa no cierra la cosecha: no se registra finished_at ni duration.
             harvest.refresh_from_db()
+            elapsed_seconds = harvest.elapsed_seconds + int(time.monotonic() - start_time)
+            if harvest.state == models.Harvest.State.PAUSING:
+                harvest.state = models.Harvest.State.PAUSED
+                harvest.elapsed_seconds = elapsed_seconds
+                harvest.save(update_fields=["state", "elapsed_seconds"])
             if harvest.state == models.Harvest.State.PAUSED:
+                harvest.elapsed_seconds = elapsed_seconds
                 harvest.save(
                     update_fields=[
                         "api_cursor",
                         "records_added",
                         "records_updated",
                         "records_failed",
+                        "elapsed_seconds",
                     ]
                 )
             else:
                 if harvest.state != models.Harvest.State.CANCELLED:
                     harvest.state = models.Harvest.State.COMPLETED
                 harvest.finished_at = timezone.now()
+                harvest.elapsed_seconds = elapsed_seconds
                 harvest.save(
                     update_fields=[
                         "state",
@@ -228,15 +262,16 @@ class OpenAlexHarvester:
                         "records_added",
                         "records_updated",
                         "records_failed",
+                        "elapsed_seconds",
                     ]
                 )
-                record_schedule_harvest_finish(harvest)
 
         except Exception as exc:
             logger.exception("Error durante la ejecución de la cosecha #%s: %s", harvest.pk, exc)
             harvest.state = models.Harvest.State.FAILED
             harvest.error_message = str(exc)
             harvest.finished_at = timezone.now()
+            harvest.elapsed_seconds += int(time.monotonic() - start_time)
             harvest.save(
                 update_fields=[
                     "state",
@@ -246,9 +281,9 @@ class OpenAlexHarvester:
                     "records_added",
                     "records_updated",
                     "records_failed",
+                    "elapsed_seconds",
                 ]
             )
-            record_schedule_harvest_finish(harvest)
             raise
         finally:
             if should_close_client:
@@ -273,12 +308,14 @@ class OpenAlexHarvester:
             harvest.records_failed += 1
             return
 
-        title = item.get("display_name") or "Sin título"
-        url_image = item.get("image_url")
-        is_deprecated = item.get("is_deprecated", False)
-        active = not is_deprecated
-        has_apc = bool(item.get("apc_usd") or item.get("apc_prices"))
-        has_full_text = bool(item.get("is_oa"))
+        title = item.get("display_name") or ""
+        url_image = item.get("image_url") or item.get("image_thumbnail_url")
+        active = item.get("is_active")
+        if not isinstance(active, bool):
+            is_deprecated = item.get("is_deprecated")
+            active = not is_deprecated if isinstance(is_deprecated, bool) else None
+        has_apc = _source_has_apc(item)
+        has_full_text = item.get("is_oa")
 
         # Gestionar Editorial en el catálogo
         editorial_name = item.get("host_organization_name") or item.get("publisher")
@@ -312,6 +349,7 @@ class OpenAlexHarvester:
                 title=title,
                 user=self.user,
                 editorial_id=editorial_id,
+                license=item.get("license") or None,
                 url_image=url_image,
                 has_apc=has_apc,
                 active=active,
@@ -353,57 +391,117 @@ def execute_harvest(harvest_id: int, **kwargs) -> models.Harvest:
     return harvester.harvest_records()
 
 
-def run_scheduled_harvests() -> list[models.Harvest]:
-    """
-    Verifica los Schedules registrados y genera/ejecuta cosechas para aquellos
-    que han alcanzado su próxima ejecución según la frecuencia configurada.
+def _next_occurrence(schedule: models.Schedule):
+    occurrences = schedule.events.count()
+    if occurrences == 0:
+        return schedule.start_date
 
-    Un Schedule se considera habilitado mientras no haya sido eliminado
-    lógicamente (soft-delete). No existe un flag is_active aparte.
-    """
-    now = timezone.now()
-    active_schedules = models.Schedule.objects.filter(deleted_at__isnull=True)
+    if schedule.frequency == models.Schedule.Frequency.ONCE:
+        return None
+    if schedule.frequency == models.Schedule.Frequency.DAILY:
+        return schedule.start_date + timedelta(days=occurrences)
+    if schedule.frequency == models.Schedule.Frequency.WEEKLY:
+        return schedule.start_date + timedelta(weeks=occurrences)
+    if schedule.frequency == models.Schedule.Frequency.MONTHLY:
+        month_index = schedule.start_date.year * 12 + schedule.start_date.month - 1 + occurrences
+        year, month_index = divmod(month_index, 12)
+        month = month_index + 1
+        day = min(schedule.start_date.day, calendar.monthrange(year, month)[1])
+        return schedule.start_date.replace(year=year, month=month, day=day)
+    return None
 
-    executed_harvests: list[models.Harvest] = []
 
-    for schedule in active_schedules:
-        # Evitar crear cosecha si ya existe una activa para la misma plataforma
-        has_active_harvest = models.Harvest.objects.filter(
-            platform=schedule.platform,
-            state__in=[
-                models.Harvest.State.PENDING,
-                models.Harvest.State.RUNNING,
-                models.Harvest.State.PAUSED,
-            ],
-        ).exists()
-        if has_active_harvest:
-            continue
+def _run_schedule_event(event: models.ScheduleEvent) -> list[models.Harvest]:
+    event.state = models.ScheduleEvent.State.RUNNING
+    event.started_at = timezone.now()
+    event.save(update_fields=["state", "started_at"])
 
-        last_harvest = schedule.harvests.order_by("-created_at").first()
-        should_run = False
-
-        if schedule.frequency == models.Schedule.Frequency.ONCE:
-            should_run = last_harvest is None
-        elif schedule.frequency == models.Schedule.Frequency.DAILY:
-            should_run = last_harvest is None or last_harvest.created_at <= now - timedelta(days=1)
-        elif schedule.frequency == models.Schedule.Frequency.WEEKLY:
-            should_run = last_harvest is None or last_harvest.created_at <= now - timedelta(weeks=1)
-        elif schedule.frequency == models.Schedule.Frequency.MONTHLY:
-            should_run = last_harvest is None or last_harvest.created_at <= now - timedelta(days=30)
-
-        if should_run:
+    harvests = []
+    failures = []
+    for platform in event.schedule.platforms.all():
+        with transaction.atomic():
+            platform = Platform.objects.select_for_update().get(pk=platform.pk)
+            active_harvest = models.Harvest.objects.filter(
+                platform=platform,
+                state__in=[
+                    models.Harvest.State.PENDING,
+                    models.Harvest.State.RUNNING,
+                    models.Harvest.State.PAUSED,
+                ],
+            ).first()
             harvest = models.Harvest.objects.create(
-                platform=schedule.platform,
-                schedule=schedule,
-                max_quantity=schedule.max_quantity,
-                stop_after_minutes=schedule.stop_after_minutes,
-                api_cursor=get_latest_cursor_for_platform(schedule.platform),
-                created_by=schedule.created_by,
+                platform=platform,
+                schedule=event.schedule,
+                event=event,
+                api_cursor=get_latest_cursor_for_platform(platform),
+                max_quantity=event.schedule.max_quantity,
+                stop_after_minutes=event.schedule.stop_after_minutes,
+                created_by=event.schedule.created_by,
+                state=(
+                    models.Harvest.State.FAILED
+                    if active_harvest
+                    else models.Harvest.State.PENDING
+                ),
+                finished_at=timezone.now() if active_harvest else None,
+                error_message=(
+                    f"La plataforma ya tiene una cosecha activa (#{active_harvest.pk})."
+                    if active_harvest
+                    else None
+                ),
             )
-            try:
-                execute_harvest(harvest.pk)
-            except Exception as exc:
-                logger.error("Error al ejecutar cosecha programada #%s: %s", harvest.pk, exc)
-            executed_harvests.append(harvest)
+        harvests.append(harvest)
+        if active_harvest:
+            failures.append(harvest.error_message)
+            continue
+        try:
+            execute_harvest(harvest.pk)
+        except Exception as exc:
+            logger.exception(
+                "Error al ejecutar Harvest #%s del evento #%s",
+                harvest.pk,
+                event.pk,
+            )
+            failures.append(str(exc))
 
-    return executed_harvests
+    event.refresh_from_db()
+    event.finished_at = timezone.now()
+    if failures:
+        event.state = models.ScheduleEvent.State.FAILED
+        event.error_message = "\n".join(failures)
+    else:
+        event.state = models.ScheduleEvent.State.COMPLETED
+    event.save(update_fields=["state", "finished_at", "error_message"])
+    return harvests
+
+
+def run_scheduled_harvests(now=None) -> list[models.Harvest]:
+    """Crea y procesa los eventos vencidos de schedules activos."""
+    now = now or timezone.now()
+    processed_harvests: list[models.Harvest] = []
+    schedule_ids = models.Schedule.objects.filter(
+        deleted_at__isnull=True,
+        start_date__lte=now,
+    ).values_list("pk", flat=True)
+
+    for schedule_id in schedule_ids:
+        with transaction.atomic():
+            schedule = models.Schedule.objects.select_for_update().get(pk=schedule_id)
+            if schedule.events.filter(state=models.ScheduleEvent.State.RUNNING).exists():
+                continue
+            scheduled_for = _next_occurrence(schedule)
+            if scheduled_for is None or scheduled_for > now:
+                continue
+            event, created = models.ScheduleEvent.objects.get_or_create(
+                schedule=schedule,
+                scheduled_for=scheduled_for,
+                defaults={"created_by": schedule.created_by},
+            )
+            if not created or event.state != models.ScheduleEvent.State.PENDING:
+                continue
+            event.state = models.ScheduleEvent.State.RUNNING
+            event.started_at = now
+            event.save(update_fields=["state", "started_at"])
+
+        processed_harvests.extend(_run_schedule_event(event))
+
+    return processed_harvests

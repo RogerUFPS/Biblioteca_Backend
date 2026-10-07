@@ -3,7 +3,7 @@ from apps.harvesting.services import run_scheduled_harvests
 
 
 class Command(BaseCommand):
-    help = "Evalúa las programaciones no eliminadas (Schedule) y ejecuta cosechas según su frecuencia."
+    help = "Procesa los eventos vencidos de las programaciones activas de cosecha."
 
     def handle(self, *args, **options):
         self.stdout.write("Evaluando programaciones de cosecha...")
@@ -13,6 +13,6 @@ class Command(BaseCommand):
         else:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"Se ejecutaron {len(harvests)} cosechas programadas exitosamente: {[h.pk for h in harvests]}."
+                    f"Se procesaron {len(harvests)} Harvest programados: {[h.pk for h in harvests]}."
                 )
             )

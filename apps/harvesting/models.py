@@ -6,11 +6,9 @@ from apps.platforms.models import Platform
 
 class Schedule(AuditableModel):
     """
-    Programación periódica de cosechas para una plataforma.
+    Programación periódica de cosechas para una o más plataformas.
 
-    El usuario define la plataforma, la frecuencia y los límites de cada ejecución.
-    Los campos de tiempo (start_date, finish_date, duration) son completamente
-    automáticos: los registra el motor de cosecha cada vez que ejecuta la programación.
+    El usuario define la fecha inicial, frecuencia y límites de las ejecuciones.
     """
 
     class Frequency(models.TextChoices):
@@ -19,12 +17,10 @@ class Schedule(AuditableModel):
         WEEKLY = "weekly", "WEEKLY"
         MONTHLY = "monthly", "MONTHLY"
 
-    # ─── El usuario define esto ─────────────────────────────────────────────
-    platform = models.ForeignKey(
+    platforms = models.ManyToManyField(
         Platform,
-        on_delete=models.PROTECT,
         related_name="schedules",
-        help_text="Plataforma académica a la que aplica esta programación.",
+        help_text="Plataformas académicas incluidas en esta programación.",
     )
 
     frequency = models.CharField(
@@ -37,53 +33,65 @@ class Schedule(AuditableModel):
     max_quantity = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Límite de registros por cosecha (opcional, obligatorio si no se define stop_after_minutes).",
     )
 
     stop_after_minutes = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Duración máxima en minutos por cosecha (opcional, obligatorio si no se define max_quantity).",
     )
 
-    # ─── El motor de cosecha registra esto automáticamente ─────────────────
     start_date = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Fecha y hora en la que inició la última cosecha asociada a esta programación. Se registra automáticamente.",
-    )
-
-    finish_date = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Fecha y hora en la que terminó la última cosecha asociada. Se registra automáticamente.",
-    )
-
-    duration = models.DurationField(
-        null=True,
-        blank=True,
-        help_text="Tiempo total que tardó la última cosecha (finish_date - start_date). Se calcula automáticamente.",
+        help_text="Fecha y hora de la primera ejecución programada.",
     )
 
     class Meta:
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Schedule #{self.pk} - {self.platform.name} ({self.get_frequency_display()})"
+        return f"Schedule #{self.pk} ({self.get_frequency_display()})"
+
+
+class ScheduleEvent(AuditableModel):
+    class State(models.TextChoices):
+        PENDING = "pending", "PENDING"
+        RUNNING = "running", "RUNNING"
+        COMPLETED = "completed", "COMPLETED"
+        FAILED = "failed", "FAILED"
+
+    schedule = models.ForeignKey(
+        Schedule,
+        on_delete=models.PROTECT,
+        related_name="events",
+    )
+    scheduled_for = models.DateTimeField()
+    state = models.CharField(
+        max_length=20,
+        choices=State.choices,
+        default=State.PENDING,
+    )
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-scheduled_for"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["schedule", "scheduled_for"],
+                name="unique_schedule_event_occurrence",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Schedule event #{self.pk} - {self.scheduled_for}"
 
 
 class Harvest(AuditableModel):
-    """
-    Proceso de cosecha para una plataforma académica correspondiente a un Schedule.
-
-    Los resultados de una cosecha son inalterables: una vez creados o completados,
-    no se pueden modificar manualmente desde la API. Durante la ejecución, solo
-    el motor de cosecha actualiza el cursor y los contadores de registros.
-    """
 
     class State(models.TextChoices):
         PENDING = "pending", "PENDING"
         RUNNING = "running", "RUNNING"
+        PAUSING = "pausing", "PAUSING"
         COMPLETED = "completed", "COMPLETED"
         FAILED = "failed", "FAILED"
         CANCELLED = "cancelled", "CANCELLED"
@@ -102,7 +110,14 @@ class Harvest(AuditableModel):
         null=True,
         blank=True,
         related_name="harvests",
-        help_text="Programación asociada a esta ejecución (opcional en ejecuciones manuales).",
+    )
+
+    event = models.ForeignKey(
+        ScheduleEvent,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="harvests",
     )
 
     api_cursor = models.CharField(
@@ -146,6 +161,11 @@ class Harvest(AuditableModel):
         help_text="Cantidad de registros que no pudieron ser procesados o fallaron validaciones.",
     )
 
+    elapsed_seconds = models.PositiveIntegerField(
+        default=0,
+        help_text="Tiempo acumulado de ejecución activa, excluyendo los periodos pausados.",
+    )
+
     started_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -169,7 +189,7 @@ class Harvest(AuditableModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["platform"],
-                condition=models.Q(state__in=["pending", "running", "paused"]),
+                condition=models.Q(state__in=["pending", "running", "pausing", "paused"]),
                 name="unique_active_harvest_per_platform",
             ),
             models.CheckConstraint(

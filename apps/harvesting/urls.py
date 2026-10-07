@@ -10,6 +10,12 @@ router.register(
 )
 
 router.register(
+    r"events",
+    views.ScheduleEventViewSet,
+    basename="schedule-event",
+)
+
+router.register(
     r"harvests",
     views.HarvestViewSet,
     basename="harvest",

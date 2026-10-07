@@ -8,8 +8,8 @@ class ScheduleFilter(django_filters.FilterSet):
     """
 
     platform = django_filters.NumberFilter(
-        field_name="platform_id",
-        help_text="ID de la plataforma asociada a la programación.",
+        field_name="platforms__id",
+        help_text="ID de una plataforma asociada a la programación.",
     )
     frequency = django_filters.CharFilter(
         field_name="frequency",
@@ -19,12 +19,12 @@ class ScheduleFilter(django_filters.FilterSet):
     start_date_after = django_filters.DateTimeFilter(
         field_name="start_date",
         lookup_expr="gte",
-        help_text="Fecha de inicio de la última cosecha, posterior o igual a (ISO-8601).",
+        help_text="Primera fecha programada, posterior o igual a (ISO-8601).",
     )
     start_date_before = django_filters.DateTimeFilter(
         field_name="start_date",
         lookup_expr="lte",
-        help_text="Fecha de inicio de la última cosecha, anterior o igual a (ISO-8601).",
+        help_text="Primera fecha programada, anterior o igual a (ISO-8601).",
     )
 
     class Meta:
