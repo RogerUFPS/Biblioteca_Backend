@@ -1,0 +1,169 @@
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APITestCase
+from unittest.mock import patch
+
+from apps.account.models import User
+from apps.harvesting.models import Harvest, Schedule, ScheduleEvent
+from apps.platforms.models import Platform
+
+
+class HarvestingViewsTestCase(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(
+            code=0,
+            full_name="Sistema",
+            email="sistema@test.local",
+        )
+        cls.platform = Platform.objects.create(
+            name="OpenAlex Test",
+            base_api_url="https://api.openalex.org",
+            created_by=cls.user,
+        )
+
+    def test_schedule_crud_operations(self):
+        payload = {
+            "platforms": [self.platform.pk],
+            "frequency": "weekly",
+            "max_quantity": 250,
+            "start_date": timezone.now().isoformat(),
+        }
+        response = self.client.post("/api/harvesting/schedules/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        schedule_id = response.data["id"]
+        self.assertEqual(response.data["platforms"], [self.platform.pk])
+        self.assertEqual(response.data["platform_names"], [self.platform.name])
+
+        response = self.client.get(f"/api/harvesting/schedules/{schedule_id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["frequency"], "weekly")
+
+        response = self.client.patch(
+            f"/api/harvesting/schedules/{schedule_id}/",
+            {"frequency": "monthly"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["frequency"], "monthly")
+
+    def test_schedule_requires_initial_datetime(self):
+        response = self.client.post(
+            "/api/harvesting/schedules/",
+            {
+                "platforms": [self.platform.pk],
+                "frequency": "daily",
+                "max_quantity": 10,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("start_date", response.data)
+
+    def test_harvest_and_event_endpoints_are_read_only(self):
+        schedule = Schedule.objects.create(
+            frequency=Schedule.Frequency.ONCE,
+            max_quantity=100,
+            start_date=timezone.now(),
+            created_by=self.user,
+        )
+        schedule.platforms.add(self.platform)
+        event = ScheduleEvent.objects.create(
+            schedule=schedule,
+            scheduled_for=timezone.now(),
+            created_by=self.user,
+        )
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            schedule=schedule,
+            event=event,
+            max_quantity=100,
+            created_by=self.user,
+        )
+
+        response = self.client.post(
+            "/api/harvesting/harvests/",
+            {"platform": self.platform.pk, "max_quantity": 100},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        response = self.client.get(f"/api/harvesting/harvests/{harvest.pk}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["event"], event.pk)
+
+        response = self.client.post(
+            f"/api/harvesting/harvests/{harvest.pk}/execute/",
+            {},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        response = self.client.post(
+            f"/api/harvesting/events/{event.pk}/",
+            {"state": "completed"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def test_pending_harvest_can_be_paused_and_resumed(self):
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=100,
+            api_cursor="openalex-cursor-123",
+            created_by=self.user,
+        )
+        response = self.client.post(
+            f"/api/harvesting/harvests/{harvest.pk}/pause/",
+            {},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["state"], Harvest.State.PAUSED)
+
+        def complete_harvest(harvest_id, **kwargs):
+            Harvest.objects.filter(pk=harvest_id).update(
+                state=Harvest.State.COMPLETED,
+                finished_at=timezone.now(),
+            )
+            return Harvest.objects.get(pk=harvest_id)
+
+        with patch(
+            "apps.harvesting.views.services.execute_harvest",
+            side_effect=complete_harvest,
+        ) as execute_harvest:
+            response = self.client.post(
+                f"/api/harvesting/harvests/{harvest.pk}/resume/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["state"], Harvest.State.COMPLETED)
+        self.assertEqual(execute_harvest.call_args.kwargs["user"], self.user)
+
+    def test_running_harvest_pause_returns_accepted_while_page_finishes(self):
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=100,
+            state=Harvest.State.RUNNING,
+            created_by=self.user,
+        )
+        response = self.client.post(
+            f"/api/harvesting/harvests/{harvest.pk}/pause/",
+            {},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data["state"], Harvest.State.PAUSING)
+
+    def test_resume_rejects_harvest_that_is_not_paused(self):
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=100,
+            created_by=self.user,
+        )
+        response = self.client.post(
+            f"/api/harvesting/harvests/{harvest.pk}/resume/",
+            {},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

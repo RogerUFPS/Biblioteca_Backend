@@ -9,6 +9,7 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
+    SharedAcademicProgramKnowledgeArea,
 )
 from apps.core.serializers import (
     RelationConfig,
@@ -18,6 +19,7 @@ from apps.core.viewsets import ArchivedNameMixin
 from apps.platforms.models import Platform
 
 from . import models
+from .services import validate_platform_for_journal_association
 
 
 JOURNAL_RELATION_CONFIG = (
@@ -166,6 +168,13 @@ class JournalPlatformRelationSerializer(
             attrs.get("finish_period"),
         )
 
+        platform = attrs.get("platform")
+        if platform:
+            validate_platform_for_journal_association(
+                platform,
+                field_name="platform",
+            )
+
         return attrs
 
 
@@ -211,11 +220,13 @@ class JournalSerializer(
         write_only=True,
     )
 
-    knowledge_areas = serializers.PrimaryKeyRelatedField(
-        many=True,
-        queryset=KnowledgeArea.objects.all(),
-        required=False,
-        write_only=True,
+    knowledge_areas = serializers.ListField(
+        child=serializers.IntegerField(),
+        read_only=True,
+        help_text=(
+            "Áreas del conocimiento derivadas automáticamente de los "
+            "programas académicos asociados."
+        ),
     )
 
     material_types = serializers.PrimaryKeyRelatedField(
@@ -269,6 +280,7 @@ class JournalSerializer(
             "validated_by",
             "validated_at",
             "fetched_at",
+            "knowledge_areas",
         ]
 
     def validate_issn(self, value):
@@ -343,6 +355,60 @@ class JournalSerializer(
             )
 
         return value
+
+    def _get_knowledge_areas_from_programs(self, programs):
+        """
+        Deriva las áreas del conocimiento a partir de los programas
+        académicos seleccionados, respetando Soft Delete.
+        """
+        program_ids = {
+            program.pk
+            for program in programs
+        }
+
+        if not program_ids:
+            return []
+
+        knowledge_area_ids = (
+            SharedAcademicProgramKnowledgeArea.objects.filter(
+                academic_program_id__in=program_ids,
+                deleted_at__isnull=True,
+                knowledge_area__deleted_at__isnull=True,
+            )
+            .values_list(
+                "knowledge_area_id",
+                flat=True,
+            )
+            .distinct()
+        )
+
+        return list(
+            KnowledgeArea.objects.filter(
+                pk__in=knowledge_area_ids,
+                deleted_at__isnull=True,
+            )
+        )
+
+    def _prepare_relation_data(self, validated_data):
+        """
+        Extrae las relaciones recibidas y deriva knowledge_areas cuando
+        academic_programs fue enviado.
+
+        Si academic_programs no viene en un PATCH, ninguna de las dos
+        relaciones se modifica.
+        """
+        relation_data = self._extract_relation_data(
+            validated_data
+        )
+
+        if "academic_programs" in relation_data:
+            relation_data["knowledge_areas"] = (
+                self._get_knowledge_areas_from_programs(
+                    relation_data["academic_programs"]
+                )
+            )
+
+        return relation_data
 
     def _validate_platform_periods(self, platform_data):
         """
@@ -453,7 +519,7 @@ class JournalSerializer(
 
     @transaction.atomic
     def create(self, validated_data):
-        relation_data = self._extract_relation_data(
+        relation_data = self._prepare_relation_data(
             validated_data
         )
 
@@ -487,7 +553,7 @@ class JournalSerializer(
         instance,
         validated_data,
     ):
-        relation_data = self._extract_relation_data(
+        relation_data = self._prepare_relation_data(
             validated_data
         )
 

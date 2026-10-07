@@ -58,7 +58,12 @@ class Platform(AuditableModel):
         default=Status.BORRADOR,
         help_text="Estado del ciclo de vida de la ficha."
     )
-    base_api_url = models.URLField(max_length=500, null=True, blank=True)
+    base_api_url = models.URLField(
+        max_length=500,
+        null=True,
+        blank=True,
+        help_text="URL base de la API para cosecha automatizada.",
+    )
     encrypted_api_key = models.TextField(null=True, blank=True)
     url_image = models.URLField(max_length=500, null=True, blank=True)
     

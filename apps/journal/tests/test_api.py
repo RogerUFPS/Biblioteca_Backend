@@ -10,6 +10,7 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
+    SharedAcademicProgramKnowledgeArea,
 )
 from apps.journal import models
 from apps.platforms.models import Platform
@@ -54,6 +55,12 @@ class JournalAPITests(APITestCase):
 
         cls.academic_program = AcademicProgram.objects.create(
             name="Biología",
+            created_by=cls.system,
+        )
+
+        SharedAcademicProgramKnowledgeArea.objects.create(
+            academic_program=cls.academic_program,
+            knowledge_area=cls.knowledge_area,
             created_by=cls.system,
         )
 
@@ -145,6 +152,47 @@ class JournalAPITests(APITestCase):
             data["created_by"],
             self.system.pk,
         )
+
+    def test_create_journal_endpoint_derives_knowledge_areas(self):
+        response = self.client.post(
+            "/api/journals/",
+            {
+                "issn": "1476-4688",
+                "title": "Nature Derived",
+                "academic_programs": [self.academic_program.pk],
+                "knowledge_areas": [999999],
+            },
+            format="json",
+        )
+
+        data = self._get_data(response)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            data["knowledge_areas"],
+            [self.knowledge_area.pk],
+        )
+
+    def test_create_journal_endpoint_rejects_draft_platform(self):
+        draft_platform = Platform.objects.create(
+            name="Draft API Platform",
+            status=Platform.Status.BORRADOR,
+            created_by=self.system,
+        )
+
+        response = self.client.post(
+            "/api/journals/",
+            {
+                "issn": "1476-4689",
+                "title": "Journal Draft Platform",
+                "platforms": [
+                    {"platform": draft_platform.pk}
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_list_journals_returns_active_journals(self):
         """

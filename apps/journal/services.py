@@ -11,6 +11,7 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
+    SharedAcademicProgramKnowledgeArea,
 )
 from apps.platforms.models import Platform
 
@@ -37,12 +38,6 @@ JOURNAL_RELATION_CONFIG = (
         Country,
     ),
     (
-        "knowledge_area_ids",
-        models.SharedJournalKnowledgeArea,
-        "knowledge_area",
-        KnowledgeArea,
-    ),
-    (
         "material_type_ids",
         models.SharedJournalMaterialType,
         "material_type",
@@ -55,6 +50,70 @@ JOURNAL_RELATION_CONFIG = (
         AcademicProgram,
     ),
 )
+
+
+def validate_platform_for_journal_association(
+    platform: Platform,
+    *,
+    field_name: str = "platform_id",
+) -> None:
+    """
+    Garantiza que una revista solo pueda asociarse a una plataforma
+    publicada.
+
+    Esta validación se reutiliza tanto en el serializer administrativo
+    como en el servicio interno de creación/cosecha.
+    """
+    if platform.status != Platform.Status.PUBLICADO:
+        raise ValidationError(
+            {
+                field_name: (
+                    "La revista no puede asociarse a una plataforma "
+                    "que no esté publicada."
+                )
+            }
+        )
+
+
+def _get_knowledge_area_ids_from_academic_programs(
+    academic_program_ids: list[int],
+) -> list[int]:
+    """
+    Obtiene la unión sin duplicados de áreas del conocimiento asociadas
+    a los programas académicos suministrados, respetando Soft Delete.
+    """
+    unique_program_ids = set(academic_program_ids)
+
+    if not unique_program_ids:
+        return []
+
+    existing_program_ids = set(
+        AcademicProgram.objects
+        .filter(pk__in=unique_program_ids)
+        .values_list("pk", flat=True)
+    )
+
+    missing_ids = unique_program_ids - existing_program_ids
+
+    if missing_ids:
+        raise ValidationError(
+            {
+                "academic_program_ids": (
+                    "Los siguientes IDs no existen o se encuentran eliminados: "
+                    f"{sorted(missing_ids)}."
+                )
+            }
+        )
+
+    return list(
+        SharedAcademicProgramKnowledgeArea.objects.filter(
+            academic_program_id__in=unique_program_ids,
+            deleted_at__isnull=True,
+            knowledge_area__deleted_at__isnull=True,
+        )
+        .values_list("knowledge_area_id", flat=True)
+        .distinct()
+    )
 
 
 def _normalize_issn(issn: str) -> str:
@@ -309,6 +368,11 @@ def _sync_source_platform(
             }
         )
 
+    validate_platform_for_journal_association(
+        platform,
+        field_name="platform_id",
+    )
+
     active_link = (
         models.SharedJournalPlatform.objects
         .filter(
@@ -463,7 +527,6 @@ def create_journal(
     finish_period: date | None = None,
     language_ids: list[int] | None = None,
     country_ids: list[int] | None = None,
-    knowledge_area_ids: list[int] | None = None,
     material_type_ids: list[int] | None = None,
     academic_program_ids: list[int] | None = None,
     platform_id: int | None = None,
@@ -486,6 +549,9 @@ def create_journal(
 
     None en una colección significa "no modificar".
     Una lista vacía significa "eliminar todas las relaciones".
+
+    Las áreas del conocimiento no se reciben como entrada: se derivan
+    exclusivamente de ``academic_program_ids``.
 
     Este servicio está diseñado como punto de entrada interno para
     los procesos de cosecha y otros procesos backend.
@@ -705,7 +771,6 @@ def create_journal(
     relation_values = {
         "language_ids": language_ids,
         "country_ids": country_ids,
-        "knowledge_area_ids": knowledge_area_ids,
         "material_type_ids": material_type_ids,
         "academic_program_ids": academic_program_ids,
     }
@@ -731,6 +796,23 @@ def create_journal(
             relation_field=relation_field,
             target_model=target_model,
             input_field=input_field,
+            user=user,
+        )
+
+    if academic_program_ids is not None:
+        derived_knowledge_area_ids = (
+            _get_knowledge_area_ids_from_academic_programs(
+                academic_program_ids
+            )
+        )
+
+        _sync_relation_ids(
+            journal=journal,
+            ids=derived_knowledge_area_ids,
+            through_model=models.SharedJournalKnowledgeArea,
+            relation_field="knowledge_area",
+            target_model=KnowledgeArea,
+            input_field="knowledge_area_ids",
             user=user,
         )
 
