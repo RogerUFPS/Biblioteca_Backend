@@ -30,6 +30,23 @@ class HarvestingServicesTestCase(TestCase):
             created_by=cls.user,
         )
 
+    def test_default_openalex_client_does_not_advertise_email(self):
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=10,
+            created_by=self.user,
+        )
+        client = OpenAlexHarvester(harvest=harvest, user=self.user)._get_client()
+        try:
+            self.assertEqual(
+                client.headers["User-Agent"],
+                "UFPS-Harvester/1.0",
+            )
+            self.assertNotIn("mailto:", client.headers["User-Agent"])
+            self.assertEqual(client.headers["Accept"], "application/json")
+        finally:
+            client.close()
+
     def test_openalex_harvester_creates_and_deduplicates_journals(self):
         # Simular respuestas de OpenAlex
         mock_response_1 = MagicMock(spec=httpx.Response)

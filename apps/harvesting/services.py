@@ -97,7 +97,7 @@ class OpenAlexHarvester:
             return self._custom_client
         return httpx.Client(
             headers={
-                "User-Agent": "UFPS-Harvester/1.0 (mailto:biblioteca@ufps.edu.co)",
+                "User-Agent": "UFPS-Harvester/1.0",
                 "Accept": "application/json",
             },
             timeout=30.0,

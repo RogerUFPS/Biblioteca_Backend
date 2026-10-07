@@ -73,39 +73,3 @@ cursor y pasar a `paused`. Las cosechas `pending` se pausan inmediatamente con
 el cursor guardado. El límite de tiempo acumula solo el tiempo de ejecución
 activa y no cuenta el tiempo que la cosecha estuvo pausada.
 
-## Trigger de ejecución
-
-Un proceso externo debe invocar periódicamente el comando de Django:
-
-```sh
-python manage.py run_scheduled_harvests
-```
-
-El comando detecta ocurrencias vencidas, crea un evento idempotente y ejecuta
-un Harvest por plataforma asociada. La periodicidad efectiva de detección
-depende de cada cuánto se invoque el comando. Los eventos conservan la fecha
-programada y los resultados de cada Harvest.
-
-## Cosecha OpenAlex y cursor
-
-El servicio consulta el endpoint `/sources` de OpenAlex con `type:journal`,
-normaliza los datos y llama a `apps.journal.services.create_journal`. La
-deduplicación y la asociación con la plataforma se realizan mediante ese
-servicio.
-
-Harvesting usa los datos disponibles de OpenAlex para completar título, ISSN,
-editorial (`host_organization_name`/`publisher`), imagen (`image_url` o
-`image_thumbnail_url`), vigencia (`is_active` o `is_deprecated`), APC
-(`apc_usd`/`apc_prices`), país (`country_code`) y acceso abierto (`is_oa`).
-Licencia solo se usa si el payload trae explícitamente ese campo. Cuando
-OpenAlex no proporciona un atributo, Harvesting lo deja sin alterar en una
-revista existente; no infiere fechas de cobertura, idiomas, áreas de
-conocimiento, tipos de material ni programas académicos. `homepage_url` no es
-una imagen y no se guarda en `url_image`.
-
-Al crear cada Harvest, se recupera el cursor no inicial más reciente usado para
-esa plataforma. Si no existe, se inicia con `*`. Después de cada página se
-persiste el `next_cursor` devuelto por OpenAlex para continuar en la siguiente
-cosecha. Los resultados de una cosecha se identifican mediante
-`records_added`, `records_updated` y `records_failed`; `elapsed_seconds` cuenta
-la ejecución efectiva, excluyendo pausas.
