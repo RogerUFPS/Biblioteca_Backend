@@ -219,7 +219,21 @@ class JournalPlatformRelationSerializer(
     )
 
     public_url = serializers.URLField(read_only=True, allow_null=True)
-    journal_url = serializers.URLField(read_only=True, allow_null=True)
+    journal_url = serializers.URLField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "URL pública de la revista dentro de esta plataforma. "
+            "Se conserva en LinkCheckLog."
+        ),
+    )
+
+    def validate_journal_url(self, value):
+        platform_services.validate_safe_http_url(
+            value,
+            field_name="journal_url",
+        )
+        return value
 
     def validate(self, attrs):
         _validate_period(
@@ -547,6 +561,34 @@ class JournalSerializer(
             ]
         )
 
+    def _sync_platform_urls(self, journal, platform_data):
+        if not platform_data:
+            return
+
+        user = journal.updated_by or journal.created_by
+        links_by_platform = {
+            link.platform_id: link
+            for link in models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform_id__in=[
+                    item["platform"].pk
+                    for item in platform_data
+                    if item.get("journal_url") is not None
+                ],
+            ).select_related("platform")
+        }
+
+        for item in platform_data:
+            if item.get("journal_url") is None:
+                continue
+            link = links_by_platform[item["platform"].pk]
+            platform_services.register_link_url(
+                platform=link.platform,
+                journal_platform=link,
+                url=item["journal_url"],
+                user=user,
+            )
+
     @transaction.atomic
     def create(self, validated_data):
         relation_data = self._prepare_relation_data(
@@ -573,6 +615,10 @@ class JournalSerializer(
             self._sync_relations(
                 parent=journal,
                 relation_data=relation_data,
+            )
+            self._sync_platform_urls(
+                journal,
+                relation_data.get("platforms"),
             )
 
         from apps.platforms.classification import recalculate_platforms
@@ -616,6 +662,10 @@ class JournalSerializer(
             self._sync_relations(
                 parent=journal,
                 relation_data=relation_data,
+            )
+            self._sync_platform_urls(
+                journal,
+                relation_data.get("platforms"),
             )
 
         from apps.platforms.classification import recalculate_platforms
