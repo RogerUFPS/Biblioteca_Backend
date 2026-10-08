@@ -10,7 +10,6 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
-    SharedAcademicProgramKnowledgeArea,
 )
 from apps.core.serializers import (
     RelationConfig,
@@ -293,11 +292,13 @@ class PlatformSerializer(
         write_only=True,
     )
 
-    academic_programs = serializers.PrimaryKeyRelatedField(
-        many=True,
-        queryset=AcademicProgram.objects.all(),
-        required=False,
-        write_only=True,
+    academic_programs = serializers.ListField(
+        child=serializers.IntegerField(),
+        read_only=True,
+        help_text=(
+            "Programas derivados automáticamente de las revistas elegibles "
+            "asociadas a la plataforma."
+        ),
     )
 
     class Meta:
@@ -331,6 +332,7 @@ class PlatformSerializer(
             "validated_by",
             "validated_at",
             "knowledge_areas",
+            "academic_programs",
         ]
 
     def validate_base_api_url(self, value):
@@ -390,43 +392,6 @@ class PlatformSerializer(
 
         return attrs
 
-    def _get_knowledge_areas_from_programs(self, programs):
-        """
-        Obtiene las áreas del conocimiento asociadas a los programas
-        académicos seleccionados.
-
-        La relación se determina exclusivamente mediante
-        SharedAcademicProgramKnowledgeArea, respetando el borrado lógico
-        tanto de la relación como del área de conocimiento.
-        """
-        program_ids = {
-            program.pk
-            for program in programs
-        }
-
-        if not program_ids:
-            return []
-
-        knowledge_area_ids = (
-            SharedAcademicProgramKnowledgeArea.objects.filter(
-                academic_program_id__in=program_ids,
-                deleted_at__isnull=True,
-                knowledge_area__deleted_at__isnull=True,
-            )
-            .values_list(
-                "knowledge_area_id",
-                flat=True,
-            )
-            .distinct()
-        )
-
-        return list(
-            KnowledgeArea.objects.filter(
-                pk__in=knowledge_area_ids,
-                deleted_at__isnull=True,
-            )
-        )
-
     def _prepare_relation_data(self, validated_data):
         """
         Extrae las relaciones recibidas y deriva las knowledge_areas
@@ -435,20 +400,7 @@ class PlatformSerializer(
         Si academic_programs no fue enviado, las relaciones existentes
         no se modifican.
         """
-        relation_data = self._extract_relation_data(
-            validated_data
-        )
-
-        if "academic_programs" in relation_data:
-            programs = relation_data["academic_programs"]
-
-            relation_data["knowledge_areas"] = (
-                self._get_knowledge_areas_from_programs(
-                    programs
-                )
-            )
-
-        return relation_data
+        return self._extract_relation_data(validated_data)
 
     def to_representation(self, instance):
         representation = super().to_representation(

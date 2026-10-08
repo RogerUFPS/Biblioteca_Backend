@@ -32,12 +32,6 @@ REQUIRED_PLATFORM_RELATIONS = (
         "un país activo asociado",
     ),
     (
-        "knowledge_areas",
-        models.SharedPlatformKnowledgeArea,
-        "knowledge_area",
-        "un área del conocimiento activa asociada",
-    ),
-    (
         "material_types",
         models.SharedPlatformMaterialType,
         "material_type",
@@ -48,12 +42,6 @@ REQUIRED_PLATFORM_RELATIONS = (
         models.SharedPlatformLanguage,
         "language",
         "un idioma activo asociado",
-    ),
-    (
-        "academic_programs",
-        models.SharedPlatformAcademicProgram,
-        "academic_program",
-        "un programa académico activo asociado",
     ),
 )
 
@@ -127,6 +115,30 @@ def validate_platform_for_publication(
         errors["valid_sintaxis"] = (
             "La sintaxis de búsqueda asociada no se encuentra activa."
         )
+
+    from apps.journal.models import SharedJournalPlatform
+
+    has_eligible_journals = SharedJournalPlatform.objects.filter(
+        platform=platform,
+        journal__deleted_at__isnull=True,
+        journal__active=True,
+        journal__validated_at__isnull=False,
+    ).exists()
+    if has_eligible_journals:
+        if not models.SharedPlatformAcademicProgram.objects.filter(
+            platform=platform,
+            academic_program__deleted_at__isnull=True,
+        ).exists():
+            errors["academic_programs"] = (
+                "Las revistas elegibles deben aportar al menos un programa académico."
+            )
+        if not models.SharedPlatformKnowledgeArea.objects.filter(
+            platform=platform,
+            knowledge_area__deleted_at__isnull=True,
+        ).exists():
+            errors["knowledge_areas"] = (
+                "Las revistas elegibles deben aportar al menos un área del conocimiento."
+            )
 
     for (
         field_name,

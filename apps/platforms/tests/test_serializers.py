@@ -139,12 +139,12 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             platform.academic_program_links.count(),
-            1,
+            0,
         )
 
         self.assertEqual(
             platform.knowledge_area_links.count(),
-            1,
+            0,
         )
 
         self.assertEqual(
@@ -154,13 +154,13 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            [self.knowledge_area.pk],
+            [],
         )
 
-    def test_platform_serializer_derives_knowledge_areas_from_academic_programs(
+    def test_platform_serializer_ignores_manual_academic_classification(
         self,
     ):
-        """Las áreas se derivan automáticamente de los programas académicos."""
+        """La clasificación manual se ignora porque ambos campos son read-only."""
         data = {
             "name": "Scielo",
             "academic_programs": [
@@ -189,10 +189,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            {
-                self.academic_program.pk,
-                self.academic_program_secondary.pk,
-            },
+            set(),
         )
 
         self.assertEqual(
@@ -202,10 +199,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            {
-                self.knowledge_area.pk,
-                self.knowledge_area_secondary.pk,
-            },
+            set(),
         )
 
         data = serializers.PlatformSerializer(
@@ -214,10 +208,7 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             set(data["knowledge_areas"]),
-            {
-                self.knowledge_area.pk,
-                self.knowledge_area_secondary.pk,
-            },
+            set(),
         )
 
     def test_platform_serializer_does_not_accept_knowledge_areas_as_input(
@@ -247,6 +238,10 @@ class PlatformSerializersTests(TestCase):
             "knowledge_areas",
             serializer.validated_data,
         )
+        self.assertNotIn(
+            "academic_programs",
+            serializer.validated_data,
+        )
 
         platform = serializer.save(
             created_by=self.system,
@@ -259,7 +254,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            [self.knowledge_area.pk],
+            [],
         )
 
     def test_platform_serializer_allows_null_api_key_without_base_api_url(
@@ -476,10 +471,10 @@ class PlatformSerializersTests(TestCase):
             updated.encrypted_api_key,
         )
 
-    def test_platform_serializer_patch_without_academic_programs_preserves_relations(
+    def test_platform_serializer_patch_cannot_create_academic_relations(
         self,
     ):
-        """Omitir academic_programs en PATCH no modifica las relaciones existentes."""
+        """Enviar academic_programs por PATCH no crea relaciones derivadas."""
         platform = models.Platform.objects.create(
             name="Plataforma Existente",
             created_by=self.system,
@@ -528,7 +523,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            [self.academic_program.pk],
+            [],
         )
 
         self.assertEqual(
@@ -538,13 +533,13 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            [self.knowledge_area.pk],
+            [],
         )
 
-    def test_platform_serializer_empty_academic_programs_clears_derived_knowledge_areas(
+    def test_platform_serializer_empty_academic_programs_is_read_only(
         self,
     ):
-        """Enviar academic_programs=[] elimina programas y áreas derivadas."""
+        """Enviar academic_programs=[] no administra relaciones derivadas."""
         platform = models.Platform.objects.create(
             name="Plataforma Clasificada",
             created_by=self.system,
@@ -571,12 +566,12 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             platform.academic_program_links.count(),
-            1,
+            0,
         )
 
         self.assertEqual(
             platform.knowledge_area_links.count(),
-            1,
+            0,
         )
 
         serializer = serializers.PlatformSerializer(
