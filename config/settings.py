@@ -34,7 +34,6 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW", False)
 CORS_ALLOW_CREDENTIALS = True
-HARVESTING_CRON_TOKEN = os.getenv("HARVESTING_CRON_TOKEN", "")
 
 if os.getenv("DJANGO_TESTING", "").lower() in {"1", "true", "yes", "on"}:
     DATABASES = {
