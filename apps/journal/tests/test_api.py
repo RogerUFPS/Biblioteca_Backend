@@ -66,6 +66,7 @@ class JournalAPITests(APITestCase):
 
         cls.platform = Platform.objects.create(
             name="Scopus API Test",
+            is_harvestable=True,
             base_api_url="https://api.scopus.test",
             status=Platform.Status.PUBLICADO,
             created_by=cls.system,

@@ -90,6 +90,7 @@ class JournalSerializersTests(TestCase):
 
         cls.platform = Platform.objects.create(
             name="Scopus Test",
+            is_harvestable=True,
             base_api_url="https://api.scopus.test",
             status=Platform.Status.PUBLICADO,
             created_by=cls.system,
@@ -988,6 +989,7 @@ class JournalSerializersTests(TestCase):
 
         draft_platform = Platform.objects.create(
             name="Draft Platform",
+            is_harvestable=True,
             base_api_url="https://api.draft.test",
             status=Platform.Status.BORRADOR,
             created_by=self.system,
@@ -1061,6 +1063,7 @@ class JournalSerializersTests(TestCase):
         second_platform = Platform.objects.create(
             name="Otra plataforma",
             status=Platform.Status.PUBLICADO,
+            is_harvestable=True,
             base_api_url="https://api.other.test",
             created_by=self.system,
         )
@@ -1135,7 +1138,74 @@ class JournalSerializersTests(TestCase):
                 created_by=self.system,
             )
 
-    def test_journal_urls_are_read_only(self):
+    def test_journal_url_is_writable_and_public_url_is_read_only(self):
         field = serializers.JournalPlatformRelationSerializer().fields
         self.assertTrue(field["public_url"].read_only)
-        self.assertTrue(field["journal_url"].read_only)
+        self.assertFalse(field["journal_url"].read_only)
+
+    def test_journal_url_creates_history_for_the_platform_relation(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "2468-1357",
+                "title": "Revista con URL contextual",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.4.4/journal/first",
+                }],
+            }
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+        link = models.SharedJournalPlatform.objects.get(
+            journal=journal,
+            platform=self.platform,
+        )
+        log = LinkCheckLog.objects.get(journal_platform=link)
+
+        self.assertEqual(log.platform, self.platform)
+        self.assertEqual(log.url, "https://8.8.4.4/journal/first")
+        self.assertFalse(hasattr(journal, "journal_url"))
+        self.assertFalse(hasattr(link, "journal_url"))
+
+        same_url = serializers.JournalSerializer(
+            journal,
+            data={
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.4.4/journal/first",
+                }]
+            },
+            partial=True,
+        )
+        self.assertTrue(same_url.is_valid(), same_url.errors)
+        same_url.save(updated_by=self.system)
+        self.assertEqual(LinkCheckLog.objects.filter(journal_platform=link).count(), 1)
+
+        new_url = serializers.JournalSerializer(
+            journal,
+            data={
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://1.1.1.1/journal/second",
+                }]
+            },
+            partial=True,
+        )
+        self.assertTrue(new_url.is_valid(), new_url.errors)
+        new_url.save(updated_by=self.system)
+        self.assertEqual(LinkCheckLog.objects.filter(journal_platform=link).count(), 2)
+
+    def test_journal_url_rejects_unsafe_ssrf_destination(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "1357-2468",
+                "title": "Revista SSRF",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "http://127.0.0.1/private",
+                }],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("platforms", serializer.errors)
