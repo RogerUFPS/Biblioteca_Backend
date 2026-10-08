@@ -155,6 +155,7 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 [
   {
     "platform": 1,
+    "journal_url": "https://revista.ejemplo.org",
     "start_period": "2020-01-01",
     "finish_period": null,
     "has_full_text": true
@@ -162,12 +163,14 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 ]
 ```
 
-En las respuestas, cada relación incluye además dos campos de solo lectura:
+En las respuestas, cada relación incluye además:
 
 - `public_url`: URL general navegable de la plataforma, tomada del último `LinkCheckLog` no eliminado cuyo `journal_platform` es nulo.
-- `journal_url`: URL de esa revista dentro de esa plataforma, tomada del último `LinkCheckLog` no eliminado asociado al `SharedJournalPlatform` correspondiente.
+- `journal_url`: campo virtual opcional de escritura y respuesta. La URL se toma del último `LinkCheckLog` no eliminado asociado al `SharedJournalPlatform` correspondiente.
 
 Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de estos valores se obtiene de `base_api_url`, que está reservado para harvesting, ni se persiste en `Journal`, `Platform` o `SharedJournalPlatform`.
+
+Omitir `journal_url` en un `PATCH` conserva el historial. Repetir la URL vigente no crea otro log; una URL diferente genera un nuevo registro. La URL puede pertenecer a un dominio distinto al de `public_url`: se valida seguridad SSRF, no igualdad de hostname.
 
 Regla obligatoria:
 

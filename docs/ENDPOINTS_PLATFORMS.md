@@ -68,6 +68,8 @@ Errors:   0
 
 ```text
 name
+public_url
+is_harvestable
 base_api_url
 api_key
 url_image
@@ -102,16 +104,17 @@ delete_explanation
 
 `knowledge_areas` **no se selecciona manualmente**. El backend la deriva a partir de `academic_programs` usando la relación `SharedAcademicProgramKnowledgeArea`.
 
-### 4.2. `base_api_url` y `api_key`
+### 4.2. `is_harvestable`, `base_api_url` y `api_key`
 
 Son datos de configuración de cosecha y son independientes de la URL pública.
 
-| `base_api_url` | `api_key` | Resultado |
-| --- | --- | --- |
-| `null` | `null` | Válido: plataforma de referencia sin API de cosecha |
-| URL | `null` | Válido: API sin autenticación |
-| URL | valor | Válido: API con credencial |
-| `null` | valor | **Inválido: HTTP 400** |
+| `is_harvestable` | `base_api_url` | `api_key` | Resultado |
+| --- | --- | --- | --- |
+| `false` | `null` | `null` | Válido: plataforma de referencia no cosechable |
+| `true` | URL | `null` | Válido: cosecha sin autenticación |
+| `true` | URL | valor | Válido: cosecha con credencial |
+| `true` | `null` | cualquiera | **Inválido: HTTP 400** |
+| `false` | URL o valor | cualquiera | **Inválido: HTTP 400** |
 
 `api_key` es de solo escritura. El backend la almacena cifrada en `encrypted_api_key`, pero ni `api_key` ni `encrypted_api_key` aparecen en las respuestas.
 
@@ -120,10 +123,13 @@ En un `PATCH`:
 - si `api_key` no se envía, se conserva la credencial actual;
 - `"api_key": null` elimina la credencial existente;
 - `"api_key": ""` se trata como ausencia de credencial.
+- cambiar `is_harvestable` de `true` a `false` limpia automáticamente `base_api_url` y la credencial cifrada.
+
+La migración inicial conserva la configuración histórica: toda plataforma existente con `base_api_url` no nula ni vacía queda con `is_harvestable=true`; las demás quedan en `false`. La migración no modifica la URL técnica ni la credencial almacenada.
 
 ### 4.3. URL pública de la plataforma
 
-La implementación actual **no almacena la URL pública en `Platform`**. Se registra y conserva en el historial `LinkCheckLog.url`. Las respuestas administrativas y públicas exponen el campo calculado y de solo lectura `public_url`.
+La implementación actual **no almacena la URL pública en `Platform`**. `public_url` es un campo virtual aceptado en `POST` y `PATCH`; se registra y conserva en `LinkCheckLog.url`, y se devuelve en las respuestas administrativas y públicas.
 
 ```text
 Platform
@@ -133,7 +139,7 @@ LinkCheckLog.url   ← URL pública (`journal_platform IS NULL`)
 Platform.base_api_url ← API de cosecha
 ```
 
-La URL pública se registra mediante:
+La URL pública puede registrarse mediante el campo virtual `public_url` del CRUD normal o verificarse mediante:
 
 ```text
 POST /api/platforms/{id}/check-link/
@@ -142,6 +148,8 @@ POST /api/platforms/{id}/check-link/
 Una plataforma necesita al menos una URL pública registrada en `LinkCheckLog` antes de poder publicarse.
 
 Si existe historial, `public_url` se obtiene del último registro no eliminado, ordenado por `last_check`, `created_at` e identificador. Los logs ligados a una revista mediante `journal_platform` no se consideran para este campo. `public_url` nunca se toma de `base_api_url`: esta última continúa siendo exclusivamente la URL técnica de harvesting.
+
+En `PATCH`, omitir `public_url` conserva el historial; enviar la misma URL no duplica logs y enviar una URL distinta crea un nuevo registro. Toda URL recibida pasa por la validación SSRF del backend.
 
 ### 4.4. Campos de `ValidSintaxis`
 
@@ -256,8 +264,8 @@ curl -X POST http://localhost:8000/api/platforms/ \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Repositorio institucional",
-    "base_api_url": null,
-    "api_key": null,
+    "public_url": "https://repositorio.ejemplo.org",
+    "is_harvestable": false,
     "start_period": "2020-01-01",
     "requires_registration": false,
     "has_access_text": true,
@@ -279,6 +287,8 @@ curl -X POST http://localhost:8000/api/platforms/ \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Plataforma con cosecha",
+    "public_url": "https://www.ejemplo.org",
+    "is_harvestable": true,
     "base_api_url": "https://api.ejemplo.org",
     "api_key": "clave-secreta",
     "start_period": "2010-01-01",
@@ -417,6 +427,7 @@ Filtros administrativos disponibles:
 
 ```text
 status
+is_harvestable
 requires_registration
 has_access_text
 valid_sintaxis
