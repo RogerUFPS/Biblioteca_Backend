@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Lower
 
@@ -133,6 +134,18 @@ class LinkCheckLog(AuditableModel):
         on_delete=models.PROTECT,
         related_name="link_check_logs",
     )
+    journal_platform = models.ForeignKey(
+        "journal.SharedJournalPlatform",
+        on_delete=models.PROTECT,
+        related_name="link_check_logs",
+        null=True,
+        blank=True,
+        help_text=(
+            "Relación revista-plataforma cuando la URL pertenece a una "
+            "revista dentro de una plataforma. Vacío para la URL pública "
+            "general de la plataforma."
+        ),
+    )
     url = models.URLField(max_length=500)
     fail_count = models.PositiveIntegerField(
         default=0,
@@ -146,7 +159,25 @@ class LinkCheckLog(AuditableModel):
     last_check = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ["-last_check", "-created_at"]
+        ordering = ["-last_check", "-created_at", "-pk"]
+
+    def clean(self):
+        super().clean()
+
+        if (
+            self.journal_platform_id is not None
+            and self.platform_id != self.journal_platform.platform_id
+        ):
+            raise ValidationError({
+                "journal_platform": (
+                    "La relación revista-plataforma debe pertenecer a la "
+                    "misma plataforma del registro de verificación."
+                )
+            })
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"LinkCheck: {self.platform.name} - Status: {self.http_status_code} (Fails: {self.fail_count})"

@@ -17,7 +17,7 @@ from apps.core.serializers import (
 )
 from apps.core.viewsets import ArchivedNameMixin
 
-from . import models
+from . import models, services
 
 
 PLATFORM_RELATION_CONFIG = (
@@ -194,6 +194,7 @@ class LinkCheckLogSerializer(
         fields = [
             *AUDIT_FIELDS,
             "platform",
+            "journal_platform",
             "url",
             "fail_count",
             "http_status_code",
@@ -240,6 +241,13 @@ class PlatformSerializer(
             "Solo puede configurarse si existe base_api_url. "
             "Se almacenará cifrada."
         ),
+    )
+
+    public_url = serializers.SerializerMethodField(
+        help_text=(
+            "URL pública navegable obtenida del último LinkCheckLog "
+            "general no eliminado. No corresponde a base_api_url."
+        )
     )
 
     base_api_url = serializers.URLField(
@@ -309,6 +317,7 @@ class PlatformSerializer(
             "name",
             "status",
             "base_api_url",
+            "public_url",
             "api_key",
             "url_image",
             "start_period",
@@ -325,7 +334,6 @@ class PlatformSerializer(
             "material_types",
             "academic_programs",
         ]
-
         read_only_fields = [
             *AUDIT_FIELDS,
             "status",
@@ -333,7 +341,13 @@ class PlatformSerializer(
             "validated_at",
             "knowledge_areas",
             "academic_programs",
+            "public_url",
         ]
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_public_url(self, obj):
+        latest_log = services.latest_platform_link_log(obj)
+        return latest_log.url if latest_log else None
 
     def validate_base_api_url(self, value):
         """Normaliza una URL base vacía a ``None``."""
@@ -610,6 +624,12 @@ class PlatformPublicSerializer(
     material_types = serializers.SerializerMethodField()
     academic_programs = serializers.SerializerMethodField()
     link_status = serializers.SerializerMethodField()
+    public_url = serializers.SerializerMethodField(
+        help_text=(
+            "URL pública navegable obtenida del último LinkCheckLog "
+            "general no eliminado."
+        )
+    )
 
     class Meta:
         model = models.Platform
@@ -618,6 +638,7 @@ class PlatformPublicSerializer(
             "id",
             "name",
             "base_api_url",
+            "public_url",
             "url_image",
             "start_period",
             "finish_period",
@@ -724,7 +745,7 @@ class PlatformPublicSerializer(
         PlatformPublicLinkStatusSchemaSerializer
     )
     def get_link_status(self, obj):
-        latest_log = obj.link_check_logs.first()
+        latest_log = services.latest_platform_link_log(obj)
 
         if latest_log:
             return {
@@ -738,3 +759,8 @@ class PlatformPublicSerializer(
             "is_active": None,
             "last_check": None,
         }
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_public_url(self, obj):
+        latest_log = services.latest_platform_link_log(obj)
+        return latest_log.url if latest_log else None

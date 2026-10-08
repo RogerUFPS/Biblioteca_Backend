@@ -16,6 +16,35 @@ LINK_CHECK_TIMEOUT_SECONDS = 10.0
 # Estos códigos indican que el servidor/recurso existe,
 # aunque requiera autenticación o restrinja el acceso.
 LINK_ACTIVE_AUTH_STATUSES = {401, 403}
+LINK_LOG_ORDERING = ("-last_check", "-created_at", "-pk")
+
+
+def latest_platform_link_log(platform):
+    """Retorna el último log no eliminado de la URL general."""
+    prefetched = getattr(platform, "_public_link_logs", None)
+    if prefetched is not None:
+        return prefetched[0] if prefetched else None
+
+    return (
+        models.LinkCheckLog.objects
+        .filter(platform=platform, journal_platform__isnull=True)
+        .order_by(*LINK_LOG_ORDERING)
+        .first()
+    )
+
+
+def latest_journal_link_log(journal_platform):
+    """Retorna el último log no eliminado de una revista-plataforma."""
+    prefetched = getattr(journal_platform, "_journal_link_logs", None)
+    if prefetched is not None:
+        return prefetched[0] if prefetched else None
+
+    return (
+        models.LinkCheckLog.objects
+        .filter(journal_platform=journal_platform)
+        .order_by(*LINK_LOG_ORDERING)
+        .first()
+    )
 
 
 REQUIRED_PLATFORM_RELATIONS = (
@@ -74,6 +103,7 @@ def validate_platform_for_publication(
     # Debe existir al menos una verificación registrada en el historial.
     if not models.LinkCheckLog.objects.filter(
         platform=platform,
+        journal_platform__isnull=True,
     ).exists():
         errors["url"] = (
             "La plataforma debe tener una URL pública registrada "
@@ -376,9 +406,10 @@ def _get_next_fail_count(
         models.LinkCheckLog.objects
         .filter(
             platform=platform,
+            journal_platform__isnull=True,
             url=url,
         )
-        .order_by("-last_check", "-pk")
+        .order_by(*LINK_LOG_ORDERING)
         .first()
     )
 
@@ -572,8 +603,11 @@ def check_platform_link(
     if url is None or not str(url).strip():
         latest_log = (
             models.LinkCheckLog.objects
-            .filter(platform=platform_snapshot)
-            .order_by("-last_check", "-pk")
+            .filter(
+                platform=platform_snapshot,
+                journal_platform__isnull=True,
+            )
+            .order_by(*LINK_LOG_ORDERING)
             .first()
         )
 
@@ -618,6 +652,7 @@ def check_platform_link(
 
         link_log = models.LinkCheckLog.objects.create(
             platform=current_platform,
+            journal_platform=None,
             url=resolved_url,
             fail_count=fail_count,
             http_status_code=status_code,

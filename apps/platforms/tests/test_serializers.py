@@ -1,4 +1,5 @@
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.account.models import User
 from apps.catalog.models import (
@@ -746,3 +747,41 @@ class PlatformSerializersTests(TestCase):
         self.assertIsNone(
             data["link_status"]["is_active"],
         )
+
+    def test_platform_urls_use_latest_non_deleted_general_log(self):
+        platform = models.Platform.objects.create(
+            name="URL pública",
+            base_api_url="https://api.example.org",
+            created_by=self.system,
+        )
+        old_log = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://public.example.org/old",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+        latest_log = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://public.example.org/current",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+        latest_log.soft_delete(self.system, "Registro descartado")
+
+        admin_data = serializers.PlatformSerializer(platform).data
+        public_data = serializers.PlatformPublicSerializer(platform).data
+
+        self.assertEqual(admin_data["public_url"], old_log.url)
+        self.assertEqual(public_data["public_url"], old_log.url)
+        self.assertNotEqual(public_data["public_url"], platform.base_api_url)
+
+    def test_public_url_is_read_only(self):
+        serializer = serializers.PlatformSerializer(
+            data={
+                "name": "Solo lectura",
+                "public_url": "https://ignored.example.org",
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertNotIn("public_url", serializer.validated_data)

@@ -1,3 +1,4 @@
+from django.db.models import Prefetch
 from django.utils import timezone
 
 from drf_spectacular.utils import (
@@ -17,6 +18,20 @@ from apps.core.viewsets import (
 )
 
 from . import filters, models, serializers, services
+
+
+def _with_public_link_logs(queryset):
+    return queryset.prefetch_related(
+        Prefetch(
+            "link_check_logs",
+            queryset=(
+                models.LinkCheckLog.objects
+                .filter(journal_platform__isnull=True)
+                .order_by(*services.LINK_LOG_ORDERING)
+            ),
+            to_attr="_public_link_logs",
+        )
+    )
 
 
 # ==============================================================================
@@ -152,6 +167,7 @@ class LinkCheckLogViewSet(viewsets.ReadOnlyModelViewSet):
 
     filterset_fields = [
         "platform",
+        "journal_platform",
         "is_active",
     ]
 
@@ -253,7 +269,7 @@ class PlatformViewSet(AuditableViewSet):
     CRUD y ciclo de vida administrativo de plataformas.
     """
 
-    queryset = models.Platform.objects.all()
+    queryset = _with_public_link_logs(models.Platform.objects.all())
     serializer_class = serializers.PlatformSerializer
 
     search_fields = [
@@ -519,9 +535,11 @@ class PlatformPublicViewSet(
     Exploración pública de plataformas publicadas y no eliminadas.
     """
 
-    queryset = models.Platform.objects.filter(
-        status=models.Platform.Status.PUBLICADO,
-    ).distinct()
+    queryset = _with_public_link_logs(
+        models.Platform.objects.filter(
+            status=models.Platform.Status.PUBLICADO,
+        ).distinct()
+    )
 
     serializer_class = serializers.PlatformPublicSerializer
 
