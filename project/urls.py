@@ -23,6 +23,10 @@ urlpatterns = [
         "api/journals/",
         include("apps.journal.urls"),
     ),
+    path(
+        "api/harvesting/",
+        include("apps.harvesting.urls"),
+    ),
 
     # OpenAPI / Swagger
     path(

@@ -6,6 +6,9 @@ from .base import *
 
 load_dotenv()
 
+def env_bool(name, default=False):
+    return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", os.getenv("SECRET_KEY"))
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in {"1", "true", "yes", "on"}
 ROOT_URLCONF = "project.urls"
@@ -15,9 +18,22 @@ ASGI_APPLICATION = "project.asgi.application"
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost").split(",")
+    for host in os.getenv("ALLOWED_HOSTS", "localhost").split(",")
     if host.strip()
 ]
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
+CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW", False)
+CORS_ALLOW_CREDENTIALS = True
 
 if os.getenv("DJANGO_TESTING", "").lower() in {"1", "true", "yes", "on"}:
     DATABASES = {
