@@ -79,50 +79,6 @@ def validate_platform_for_journal_association(
         )
 
 
-<<<<<<< HEAD
-def _get_knowledge_area_ids_from_academic_programs(
-    academic_program_ids: list[int],
-) -> list[int]:
-    """
-    Obtiene la unión sin duplicados de áreas del conocimiento asociadas
-    a los programas académicos suministrados, respetando Soft Delete.
-    """
-    unique_program_ids = set(academic_program_ids)
-
-    if not unique_program_ids:
-        return []
-
-    existing_program_ids = set(
-        AcademicProgram.objects
-        .filter(pk__in=unique_program_ids)
-        .values_list("pk", flat=True)
-    )
-
-    missing_ids = unique_program_ids - existing_program_ids
-
-    if missing_ids:
-        raise ValidationError(
-            {
-                "academic_program_ids": (
-                    "Los siguientes IDs no existen o se encuentran eliminados: "
-                    f"{sorted(missing_ids)}."
-                )
-            }
-        )
-
-    return list(
-        SharedAcademicProgramKnowledgeArea.objects.filter(
-            academic_program_id__in=unique_program_ids,
-            deleted_at__isnull=True,
-            knowledge_area__deleted_at__isnull=True,
-        )
-        .values_list("knowledge_area_id", flat=True)
-        .distinct()
-    )
-
-
-=======
->>>>>>> production
 def _normalize_issn(issn: str) -> str:
     """
     Normaliza el ISSN al formato XXXX-XXXX.
@@ -810,23 +766,6 @@ def create_journal(
             relation_field=relation_field,
             target_model=target_model,
             input_field=input_field,
-            user=user,
-        )
-
-    if academic_program_ids is not None:
-        derived_knowledge_area_ids = (
-            _get_knowledge_area_ids_from_academic_programs(
-                academic_program_ids
-            )
-        )
-
-        _sync_relation_ids(
-            journal=journal,
-            ids=derived_knowledge_area_ids,
-            through_model=models.SharedJournalKnowledgeArea,
-            relation_field="knowledge_area",
-            target_model=KnowledgeArea,
-            input_field="knowledge_area_ids",
             user=user,
         )
 

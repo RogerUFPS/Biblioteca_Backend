@@ -1,3 +1,4 @@
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -19,6 +20,7 @@ class HarvestingViewsTestCase(APITestCase):
         cls.platform = Platform.objects.create(
             name="OpenAlex Test",
             base_api_url="https://api.openalex.org",
+            is_harvestable=True,
             created_by=cls.user,
         )
 
@@ -59,6 +61,62 @@ class HarvestingViewsTestCase(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("start_date", response.data)
+
+    def test_schedule_rejects_non_harvestable_platform(self):
+        self.platform.is_harvestable = False
+        self.platform.save(update_fields=["is_harvestable"])
+
+        response = self.client.post(
+            "/api/harvesting/schedules/",
+            {
+                "platforms": [self.platform.pk],
+                "frequency": "daily",
+                "max_quantity": 10,
+                "start_date": timezone.now().isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("platforms", response.data)
+        self.assertIn(self.platform.name, str(response.data["platforms"]))
+        self.assertEqual(Schedule.objects.count(), 0)
+
+    @override_settings(HARVESTING_CRON_TOKEN="test-secret")
+    @patch("apps.harvesting.views.services.run_scheduled_harvests", return_value=[])
+    def test_run_due_executes_scheduled_harvests_with_cron_token(self, run_scheduled):
+        response = self.client.post(
+            "/api/harvesting/schedules/run-due/",
+            {},
+            format="json",
+            HTTP_X_HARVESTING_CRON_TOKEN="test-secret",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [])
+        run_scheduled.assert_called_once_with()
+
+    @override_settings(HARVESTING_CRON_TOKEN="test-secret")
+    def test_run_due_rejects_invalid_cron_token(self):
+        response = self.client.post(
+            "/api/harvesting/schedules/run-due/",
+            {},
+            format="json",
+            HTTP_X_HARVESTING_CRON_TOKEN="wrong-secret",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    @override_settings(HARVESTING_CRON_TOKEN="")
+    def test_run_due_is_unavailable_without_configured_token(self):
+        response = self.client.post(
+            "/api/harvesting/schedules/run-due/",
+            {},
+            format="json",
+            HTTP_X_HARVESTING_CRON_TOKEN="test-secret",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
 
     def test_harvest_and_event_endpoints_are_read_only(self):
         schedule = Schedule.objects.create(

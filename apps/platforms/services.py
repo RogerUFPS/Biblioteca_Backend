@@ -171,10 +171,7 @@ def validate_platform_for_publication(
     # Debe existir al menos una verificación registrada en el historial.
     if not models.LinkCheckLog.objects.filter(
         platform=platform,
-<<<<<<< HEAD
-=======
         journal_platform__isnull=True,
->>>>>>> production
     ).exists():
         errors["url"] = (
             "La plataforma debe tener una URL pública registrada "
@@ -189,8 +186,6 @@ def validate_platform_for_publication(
                 "si tiene una API Key configurada."
             )
 
-<<<<<<< HEAD
-=======
     if platform.is_harvestable and not platform.base_api_url:
         errors["base_api_url"] = (
             "Una plataforma cosechable debe tener una URL base de API."
@@ -204,7 +199,6 @@ def validate_platform_for_publication(
             "configuración técnica de cosecha."
         )
 
->>>>>>> production
     # Si no tiene API Key, base_api_url es completamente opcional.
 
     if not platform.start_period:
@@ -498,16 +492,10 @@ def _get_next_fail_count(
         models.LinkCheckLog.objects
         .filter(
             platform=platform,
-<<<<<<< HEAD
-            url=url,
-        )
-        .order_by("-last_check", "-pk")
-=======
             journal_platform__isnull=True,
             url=url,
         )
         .order_by(*LINK_LOG_ORDERING)
->>>>>>> production
         .first()
     )
 
@@ -701,16 +689,11 @@ def check_platform_link(
     if url is None or not str(url).strip():
         latest_log = (
             models.LinkCheckLog.objects
-<<<<<<< HEAD
-            .filter(platform=platform_snapshot)
-            .order_by("-last_check", "-pk")
-=======
             .filter(
                 platform=platform_snapshot,
                 journal_platform__isnull=True,
             )
             .order_by(*LINK_LOG_ORDERING)
->>>>>>> production
             .first()
         )
 
@@ -755,10 +738,7 @@ def check_platform_link(
 
         link_log = models.LinkCheckLog.objects.create(
             platform=current_platform,
-<<<<<<< HEAD
-=======
             journal_platform=None,
->>>>>>> production
             url=resolved_url,
             fail_count=fail_count,
             http_status_code=status_code,

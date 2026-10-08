@@ -244,8 +244,6 @@ class PlatformSerializer(
         ),
     )
 
-<<<<<<< HEAD
-=======
     public_url = serializers.URLField(
         required=False,
         allow_null=True,
@@ -255,7 +253,6 @@ class PlatformSerializer(
         )
     )
 
->>>>>>> production
     base_api_url = serializers.URLField(
         required=False,
         allow_null=True,
@@ -347,138 +344,12 @@ class PlatformSerializer(
             "validated_by",
             "validated_at",
             "knowledge_areas",
-<<<<<<< HEAD
-        ]
-
-    def validate_base_api_url(self, value):
-        """Normaliza una URL base vacía a ``None``."""
-        if value == "":
-            return None
-
-        return value
-
-    def validate_api_key(self, value):
-        """Normaliza una API Key vacía a ``None``."""
-        if value == "":
-            return None
-
-        return value
-
-    def validate(self, attrs):
-        """
-        Valida las reglas de configuración de la cosecha.
-
-        - Una plataforma puede existir sin API Key.
-        - Una plataforma puede existir sin base_api_url si solo funciona
-        como referencia pública.
-        - Nunca se permite conservar/configurar una API Key sin una
-        base_api_url correspondiente.
-        - Las knowledge_areas se derivan automáticamente de los
-        academic_programs.
-        """
-        attrs = super().validate(attrs)
-
-        instance = self.instance
-
-        if "base_api_url" in attrs:
-            effective_base_api_url = attrs["base_api_url"]
-        elif instance is not None:
-            effective_base_api_url = instance.base_api_url
-        else:
-            effective_base_api_url = None
-
-        if "api_key" in attrs:
-            effective_api_key = attrs["api_key"]
-            has_api_key = bool(effective_api_key)
-        elif instance is not None:
-            has_api_key = bool(instance.encrypted_api_key)
-        else:
-            has_api_key = False
-
-        if has_api_key and not effective_base_api_url:
-            raise serializers.ValidationError(
-                {
-                    "base_api_url": (
-                        "No se puede configurar una API Key sin una URL base "
-                        "de la API (base_api_url)."
-                    )
-                }
-            )
-
-        return attrs
-
-    def _get_knowledge_areas_from_programs(self, programs):
-        """
-        Obtiene las áreas del conocimiento asociadas a los programas
-        académicos seleccionados.
-
-        La relación se determina exclusivamente mediante
-        SharedAcademicProgramKnowledgeArea, respetando el borrado lógico
-        tanto de la relación como del área de conocimiento.
-        """
-        program_ids = {
-            program.pk
-            for program in programs
-        }
-
-        if not program_ids:
-            return []
-
-        knowledge_area_ids = (
-            SharedAcademicProgramKnowledgeArea.objects.filter(
-                academic_program_id__in=program_ids,
-                deleted_at__isnull=True,
-                knowledge_area__deleted_at__isnull=True,
-            )
-            .values_list(
-                "knowledge_area_id",
-                flat=True,
-            )
-            .distinct()
-        )
-
-        return list(
-            KnowledgeArea.objects.filter(
-                pk__in=knowledge_area_ids,
-                deleted_at__isnull=True,
-            )
-        )
-
-    def _prepare_relation_data(self, validated_data):
-        """
-        Extrae las relaciones recibidas y deriva las knowledge_areas
-        cuando el cliente ha enviado academic_programs.
-
-        Si academic_programs no fue enviado, las relaciones existentes
-        no se modifican.
-        """
-        relation_data = self._extract_relation_data(
-            validated_data
-        )
-
-        if "academic_programs" in relation_data:
-            programs = relation_data["academic_programs"]
-
-            relation_data["knowledge_areas"] = (
-                self._get_knowledge_areas_from_programs(
-                    programs
-                )
-            )
-
-        return relation_data
-
-    def to_representation(self, instance):
-        representation = super().to_representation(
-            instance
-        )
-=======
             "academic_programs",
         ]
 
     def validate_public_url(self, value):
         services.validate_safe_http_url(value, field_name="public_url")
         return value
->>>>>>> production
 
     def validate_base_api_url(self, value):
         """Normaliza una URL base vacía a ``None``."""
@@ -667,27 +538,20 @@ class PlatformSerializer(
         instance,
         validated_data,
     ):
-<<<<<<< HEAD
-        api_key_was_sent = "api_key" in validated_data
-=======
         public_url_was_sent = "public_url" in validated_data
         public_url = validated_data.pop("public_url", None)
         disabling_harvesting = validated_data.get("is_harvestable") is False
         api_key_was_sent = "api_key" in validated_data or disabling_harvesting
->>>>>>> production
 
         raw_api_key = validated_data.pop(
             "api_key",
             None,
         )
 
-<<<<<<< HEAD
-=======
         if disabling_harvesting:
             validated_data["base_api_url"] = None
             raw_api_key = None
 
->>>>>>> production
         relation_data = self._prepare_relation_data(
             validated_data
         )
@@ -956,13 +820,9 @@ class PlatformPublicSerializer(
             "url": None,
             "is_active": None,
             "last_check": None,
-<<<<<<< HEAD
-        }
-=======
         }
 
     @extend_schema_field(serializers.URLField(allow_null=True))
     def get_public_url(self, obj):
         latest_log = services.latest_platform_link_log(obj)
         return latest_log.url if latest_log else None
->>>>>>> production

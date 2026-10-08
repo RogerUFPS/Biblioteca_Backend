@@ -1,5 +1,7 @@
 import logging
+import secrets
 
+from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -48,6 +50,36 @@ class ScheduleViewSet(AuditableViewSet):
     search_fields = ["platforms__name"]
     ordering_fields = ["created_at", "start_date"]
     ordering = ["-created_at"]
+
+    @extend_schema(
+        summary="Procesar cosechas programadas vencidas",
+        description=(
+            "Evalúa las programaciones vencidas y ejecuta las cosechas "
+            "correspondientes. Requiere el token configurado en "
+            "HARVESTING_CRON_TOKEN mediante el encabezado "
+            "X-Harvesting-Cron-Token."
+        ),
+        responses={200: serializers.HarvestSerializer(many=True)},
+        tags=["Cosecha - Programaciones"],
+    )
+    @action(detail=False, methods=["post"], url_path="run-due")
+    def run_due(self, request):
+        cron_token = getattr(settings, "HARVESTING_CRON_TOKEN", "")
+        if not cron_token:
+            return Response(
+                {"detail": "El endpoint de cron no está configurado."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        provided_token = request.headers.get("X-Harvesting-Cron-Token", "")
+        if not secrets.compare_digest(provided_token, cron_token):
+            return Response(
+                {"detail": "Token de cron inválido."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        harvests = services.run_scheduled_harvests()
+        return Response(serializers.HarvestSerializer(harvests, many=True).data)
 
 
 class ScheduleEventViewSet(viewsets.ReadOnlyModelViewSet):

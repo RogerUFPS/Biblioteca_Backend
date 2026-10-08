@@ -33,6 +33,9 @@ Ejemplo de creación:
 ```
 
 - `platforms`: lista no vacía de IDs de plataformas.
+- Solo se aceptan plataformas con `is_harvestable=true`. Si una plataforma
+  vinculada se deshabilita después de crear la programación, su Harvest se
+  registra como fallido y no inicia la recolección.
 - `frequency`: `once`, `daily`, `weekly` o `monthly`.
 - `start_date`: fecha y hora de la primera ejecución; las siguientes se calculan
   desde esa ocurrencia.
@@ -53,6 +56,34 @@ El evento registra la ocurrencia programada, estado (`pending`, `running`,
 `completed`, `failed`), fechas de ejecución, errores y cosechas asociadas.
 Admite filtros `schedule` y `state`.
 
+## Ejecución desde cron
+
+El cron llama `POST /api/harvesting/schedules/run-due/`. La ruta procesa las
+programaciones vencidas y responde con la lista de Harvest procesados. Configura
+`HARVESTING_CRON_TOKEN` en el entorno de la aplicación y envía el valor en el
+encabezado `X-Harvesting-Cron-Token`; sin token configurado responde `503` y con
+un token ausente o inválido responde `403`.
+
+El repositorio incluye `script.sh` para realizar la llamada y verificar que la
+respuesta sea HTTP `200` y un arreglo JSON:
+
+```sh
+HARVESTING_API_URL=https://tu-dominio \
+HARVESTING_CRON_TOKEN=tu-token \
+./script.sh
+```
+
+Programa el mismo script desde el cron del servidor:
+
+```cron
+*/5 * * * * HARVESTING_API_URL=https://tu-dominio HARVESTING_CRON_TOKEN=tu-token /ruta/al/repositorio/script.sh
+```
+
+El script falla con código distinto de cero ante errores HTTP, errores de red,
+configuración faltante o una respuesta con formato inesperado. Mantén el token
+fuera del repositorio y usa una configuración del cron accesible solo para el
+usuario del servicio.
+
 ## Historial de cosechas
 
 Ruta base: `/api/harvesting/harvests/`
@@ -72,4 +103,3 @@ cursor y pasar a `paused`. Las cosechas `pending` se pausan inmediatamente con
 `200 OK`. Reanudar solo es posible desde `paused`; el servicio continúa desde
 el cursor guardado. El límite de tiempo acumula solo el tiempo de ejecución
 activa y no cuenta el tiempo que la cosecha estuvo pausada.
-

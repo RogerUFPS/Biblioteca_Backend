@@ -129,27 +129,6 @@ class PlatformServicesTests(TestCase):
     def test_publish_platform_succeeds_when_complete(self):
         """Verifica que una plataforma con toda la ficha valida pase a PUBLICADO."""
         platform = self._setup_complete_platform()
-<<<<<<< HEAD
-
-        published = services.publish_platform(
-            platform=platform,
-            user=self.system,
-        )
-
-        self.assertEqual(
-            published.status,
-            models.Platform.Status.PUBLICADO,
-        )
-
-        self.assertEqual(
-            published.validated_by,
-            self.system,
-        )
-
-        self.assertIsNotNone(
-            published.validated_at,
-        )
-=======
 
         published = services.publish_platform(
             platform=platform,
@@ -192,7 +171,6 @@ class PlatformServicesTests(TestCase):
             services.publish_platform(platform=platform, user=self.system)
 
         self.assertIn("base_api_url", context.exception.detail)
->>>>>>> production
 
     def test_publish_platform_fails_when_incomplete(self):
         """Verifica que la publicacion falle si faltan relaciones o campos obligatorios."""
@@ -294,14 +272,11 @@ class PlatformServicesTests(TestCase):
             services._validate_safe_http_url(
                 "http://192.168.1.1/api"
             )
-<<<<<<< HEAD
-=======
 
         with self.assertRaises(ValidationError):
             services.validate_safe_http_url(
                 "http://metadata.google.internal/computeMetadata/v1/"
             )
->>>>>>> production
 
     @patch("apps.platforms.services._perform_link_check")
     @patch("apps.platforms.services._validate_safe_http_url")
@@ -366,8 +341,4 @@ class PlatformServicesTests(TestCase):
 
         self.assertTrue(
             log3.is_active,
-<<<<<<< HEAD
         )
-=======
-        )
->>>>>>> production

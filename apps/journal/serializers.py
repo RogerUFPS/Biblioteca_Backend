@@ -444,42 +444,6 @@ class JournalSerializer(
 
         return value
 
-<<<<<<< HEAD
-    def _get_knowledge_areas_from_programs(self, programs):
-        """
-        Deriva las áreas del conocimiento a partir de los programas
-        académicos seleccionados, respetando Soft Delete.
-        """
-        program_ids = {
-            program.pk
-            for program in programs
-        }
-
-        if not program_ids:
-            return []
-
-        knowledge_area_ids = (
-            SharedAcademicProgramKnowledgeArea.objects.filter(
-                academic_program_id__in=program_ids,
-                deleted_at__isnull=True,
-                knowledge_area__deleted_at__isnull=True,
-            )
-            .values_list(
-                "knowledge_area_id",
-                flat=True,
-            )
-            .distinct()
-        )
-
-        return list(
-            KnowledgeArea.objects.filter(
-                pk__in=knowledge_area_ids,
-                deleted_at__isnull=True,
-            )
-        )
-
-=======
->>>>>>> production
     def _prepare_relation_data(self, validated_data):
         """
         Extrae las relaciones recibidas y deriva knowledge_areas cuando
@@ -488,22 +452,7 @@ class JournalSerializer(
         Si academic_programs no viene en un PATCH, ninguna de las dos
         relaciones se modifica.
         """
-<<<<<<< HEAD
-        relation_data = self._extract_relation_data(
-            validated_data
-        )
-
-        if "academic_programs" in relation_data:
-            relation_data["knowledge_areas"] = (
-                self._get_knowledge_areas_from_programs(
-                    relation_data["academic_programs"]
-                )
-            )
-
-        return relation_data
-=======
         return self._extract_relation_data(validated_data)
->>>>>>> production
 
     def _validate_platform_periods(self, platform_data):
         """
@@ -704,13 +653,10 @@ class JournalSerializer(
         instance,
         validated_data,
     ):
-<<<<<<< HEAD
-=======
         previous_platform_ids = set(
             models.SharedJournalPlatform.objects.filter(journal=instance)
             .values_list("platform_id", flat=True)
         )
->>>>>>> production
         relation_data = self._prepare_relation_data(
             validated_data
         )

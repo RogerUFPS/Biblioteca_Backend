@@ -68,11 +68,8 @@ Errors:   0
 
 ```text
 name
-<<<<<<< HEAD
-=======
 public_url
 is_harvestable
->>>>>>> production
 base_api_url
 api_key
 url_image
@@ -107,18 +104,6 @@ delete_explanation
 
 `knowledge_areas` **no se selecciona manualmente**. El backend la deriva a partir de `academic_programs` usando la relación `SharedAcademicProgramKnowledgeArea`.
 
-<<<<<<< HEAD
-### 4.2. `base_api_url` y `api_key`
-
-Son datos de configuración de cosecha y son independientes de la URL pública.
-
-| `base_api_url` | `api_key` | Resultado |
-| --- | --- | --- |
-| `null` | `null` | Válido: plataforma de referencia sin API de cosecha |
-| URL | `null` | Válido: API sin autenticación |
-| URL | valor | Válido: API con credencial |
-| `null` | valor | **Inválido: HTTP 400** |
-=======
 ### 4.2. `is_harvestable`, `base_api_url` y `api_key`
 
 Son datos de configuración de cosecha y son independientes de la URL pública.
@@ -130,7 +115,6 @@ Son datos de configuración de cosecha y son independientes de la URL pública.
 | `true` | URL | valor | Válido: cosecha con credencial |
 | `true` | `null` | cualquiera | **Inválido: HTTP 400** |
 | `false` | URL o valor | cualquiera | **Inválido: HTTP 400** |
->>>>>>> production
 
 `api_key` es de solo escritura. El backend la almacena cifrada en `encrypted_api_key`, pero ni `api_key` ni `encrypted_api_key` aparecen en las respuestas.
 
@@ -139,12 +123,6 @@ En un `PATCH`:
 - si `api_key` no se envía, se conserva la credencial actual;
 - `"api_key": null` elimina la credencial existente;
 - `"api_key": ""` se trata como ausencia de credencial.
-<<<<<<< HEAD
-
-### 4.3. URL pública de la plataforma
-
-La implementación actual **no almacena la URL pública en `Platform`**. Se registra y conserva en el historial `LinkCheckLog.url`.
-=======
 - cambiar `is_harvestable` de `true` a `false` limpia automáticamente `base_api_url` y la credencial cifrada.
 
 La migración inicial conserva la configuración histórica: toda plataforma existente con `base_api_url` no nula ni vacía queda con `is_harvestable=true`; las demás quedan en `false`. La migración no modifica la URL técnica ni la credencial almacenada.
@@ -152,25 +130,16 @@ La migración inicial conserva la configuración histórica: toda plataforma exi
 ### 4.3. URL pública de la plataforma
 
 La implementación actual **no almacena la URL pública en `Platform`**. `public_url` es un campo virtual aceptado en `POST` y `PATCH`; se registra y conserva en `LinkCheckLog.url`, y se devuelve en las respuestas administrativas y públicas.
->>>>>>> production
 
 ```text
 Platform
     ↓
-<<<<<<< HEAD
-LinkCheckLog.url   ← URL pública
-=======
 LinkCheckLog.url   ← URL pública (`journal_platform IS NULL`)
->>>>>>> production
 
 Platform.base_api_url ← API de cosecha
 ```
 
-<<<<<<< HEAD
-La URL pública se registra mediante:
-=======
 La URL pública puede registrarse mediante el campo virtual `public_url` del CRUD normal o verificarse mediante:
->>>>>>> production
 
 ```text
 POST /api/platforms/{id}/check-link/
@@ -178,13 +147,10 @@ POST /api/platforms/{id}/check-link/
 
 Una plataforma necesita al menos una URL pública registrada en `LinkCheckLog` antes de poder publicarse.
 
-<<<<<<< HEAD
-=======
 Si existe historial, `public_url` se obtiene del último registro no eliminado, ordenado por `last_check`, `created_at` e identificador. Los logs ligados a una revista mediante `journal_platform` no se consideran para este campo. `public_url` nunca se toma de `base_api_url`: esta última continúa siendo exclusivamente la URL técnica de harvesting.
 
 En `PATCH`, omitir `public_url` conserva el historial; enviar la misma URL no duplica logs y enviar una URL distinta crea un nuevo registro. Toda URL recibida pasa por la validación SSRF del backend.
 
->>>>>>> production
 ### 4.4. Campos de `ValidSintaxis`
 
 Campos de escritura:
@@ -249,11 +215,7 @@ Cuando una plataforma eliminada se restaura, vuelve a `BORRADOR` y se limpian `v
 
 ### 5.3. Historial de verificación
 
-<<<<<<< HEAD
-`LinkCheckLog` es de solo lectura para el cliente.
-=======
 `LinkCheckLog` es de solo lectura para el cliente. `journal_platform = null` identifica la URL general de la plataforma; un valor no nulo identifica la URL de una revista dentro de esa plataforma. En el segundo caso, la plataforma de ambos FKs debe coincidir.
->>>>>>> production
 
 | Método | Ruta | Uso |
 | --- | --- | --- |
@@ -302,13 +264,8 @@ curl -X POST http://localhost:8000/api/platforms/ \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Repositorio institucional",
-<<<<<<< HEAD
-    "base_api_url": null,
-    "api_key": null,
-=======
     "public_url": "https://repositorio.ejemplo.org",
     "is_harvestable": false,
->>>>>>> production
     "start_period": "2020-01-01",
     "requires_registration": false,
     "has_access_text": true,
@@ -330,11 +287,8 @@ curl -X POST http://localhost:8000/api/platforms/ \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Plataforma con cosecha",
-<<<<<<< HEAD
-=======
     "public_url": "https://www.ejemplo.org",
     "is_harvestable": true,
->>>>>>> production
     "base_api_url": "https://api.ejemplo.org",
     "api_key": "clave-secreta",
     "start_period": "2010-01-01",
@@ -473,10 +427,7 @@ Filtros administrativos disponibles:
 
 ```text
 status
-<<<<<<< HEAD
-=======
 is_harvestable
->>>>>>> production
 requires_registration
 has_access_text
 valid_sintaxis
@@ -587,8 +538,6 @@ docker compose -f docker/docker-compose.yml exec web python manage.py check
 ```
 
 La autenticación JWT, los permisos y la protección de escritura se implementarán en la Fase B.
-<<<<<<< HEAD
-=======
 # Clasificación derivada vigente
 
 El Frontend no administra `academic_programs` ni `knowledge_areas`; ambos son
@@ -620,4 +569,3 @@ esta invalidación.
 Ejemplo de creación/edición: se envían los metadatos y relaciones no académicas
 (`institutions`, `languages`, `countries`, `material_types`), pero se omiten
 `academic_programs` y `knowledge_areas`.
->>>>>>> production

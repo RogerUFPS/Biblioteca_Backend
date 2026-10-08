@@ -766,8 +766,4 @@ class JournalServicesTests(TestCase):
                 user=self.system,
             )
 
-<<<<<<< HEAD
         self.assertIn("platform_id", context.exception.detail)
-=======
-        self.assertIn("platform_id", context.exception.detail)
->>>>>>> production

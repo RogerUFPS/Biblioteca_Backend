@@ -143,20 +143,12 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             platform.academic_program_links.count(),
-<<<<<<< HEAD
-            1,
-=======
             0,
->>>>>>> production
         )
 
         self.assertEqual(
             platform.knowledge_area_links.count(),
-<<<<<<< HEAD
-            1,
-=======
             0,
->>>>>>> production
         )
 
         self.assertEqual(
@@ -166,15 +158,6 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-<<<<<<< HEAD
-            [self.knowledge_area.pk],
-        )
-
-    def test_platform_serializer_derives_knowledge_areas_from_academic_programs(
-        self,
-    ):
-        """Las áreas se derivan automáticamente de los programas académicos."""
-=======
             [],
         )
 
@@ -182,7 +165,6 @@ class PlatformSerializersTests(TestCase):
         self,
     ):
         """La clasificación manual se ignora porque ambos campos son read-only."""
->>>>>>> production
         data = {
             "name": "Scielo",
             "academic_programs": [
@@ -211,14 +193,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-<<<<<<< HEAD
-            {
-                self.academic_program.pk,
-                self.academic_program_secondary.pk,
-            },
-=======
             set(),
->>>>>>> production
         )
 
         self.assertEqual(
@@ -228,14 +203,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-<<<<<<< HEAD
-            {
-                self.knowledge_area.pk,
-                self.knowledge_area_secondary.pk,
-            },
-=======
             set(),
->>>>>>> production
         )
 
         data = serializers.PlatformSerializer(
@@ -244,14 +212,7 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             set(data["knowledge_areas"]),
-<<<<<<< HEAD
-            {
-                self.knowledge_area.pk,
-                self.knowledge_area_secondary.pk,
-            },
-=======
             set(),
->>>>>>> production
         )
 
     def test_platform_serializer_does_not_accept_knowledge_areas_as_input(
@@ -281,13 +242,10 @@ class PlatformSerializersTests(TestCase):
             "knowledge_areas",
             serializer.validated_data,
         )
-<<<<<<< HEAD
-=======
         self.assertNotIn(
             "academic_programs",
             serializer.validated_data,
         )
->>>>>>> production
 
         platform = serializer.save(
             created_by=self.system,
@@ -300,11 +258,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-<<<<<<< HEAD
-            [self.knowledge_area.pk],
-=======
             [],
->>>>>>> production
         )
 
     def test_platform_serializer_allows_null_api_key_without_base_api_url(
@@ -349,10 +303,7 @@ class PlatformSerializersTests(TestCase):
         """Una plataforma puede tener API sin requerir una API Key."""
         data = {
             "name": "API Publica",
-<<<<<<< HEAD
-=======
             "is_harvestable": True,
->>>>>>> production
             "base_api_url": "https://api.publica.org",
             "api_key": None,
         }
@@ -408,10 +359,7 @@ class PlatformSerializersTests(TestCase):
         """Enviar api_key=null elimina una API Key previamente configurada."""
         platform = models.Platform.objects.create(
             name="Plataforma Con API Key",
-<<<<<<< HEAD
-=======
             is_harvestable=True,
->>>>>>> production
             base_api_url="https://api.example.org",
             created_by=self.system,
         )
@@ -456,10 +404,7 @@ class PlatformSerializersTests(TestCase):
         """No se puede eliminar base_api_url mientras exista una API Key."""
         platform = models.Platform.objects.create(
             name="API Configurada",
-<<<<<<< HEAD
-=======
             is_harvestable=True,
->>>>>>> production
             base_api_url="https://api.example.org",
             created_by=self.system,
         )
@@ -495,10 +440,7 @@ class PlatformSerializersTests(TestCase):
         """Se pueden eliminar simultáneamente base_api_url y API Key."""
         platform = models.Platform.objects.create(
             name="API A Eliminar",
-<<<<<<< HEAD
-=======
             is_harvestable=True,
->>>>>>> production
             base_api_url="https://api.example.org",
             created_by=self.system,
         )
@@ -510,10 +452,7 @@ class PlatformSerializersTests(TestCase):
         platform.save()
 
         data = {
-<<<<<<< HEAD
-=======
             "is_harvestable": False,
->>>>>>> production
             "base_api_url": None,
             "api_key": None,
         }
@@ -541,17 +480,10 @@ class PlatformSerializersTests(TestCase):
             updated.encrypted_api_key,
         )
 
-<<<<<<< HEAD
-    def test_platform_serializer_patch_without_academic_programs_preserves_relations(
-        self,
-    ):
-        """Omitir academic_programs en PATCH no modifica las relaciones existentes."""
-=======
     def test_platform_serializer_patch_cannot_create_academic_relations(
         self,
     ):
         """Enviar academic_programs por PATCH no crea relaciones derivadas."""
->>>>>>> production
         platform = models.Platform.objects.create(
             name="Plataforma Existente",
             created_by=self.system,
@@ -600,11 +532,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-<<<<<<< HEAD
-            [self.academic_program.pk],
-=======
             [],
->>>>>>> production
         )
 
         self.assertEqual(
@@ -614,15 +542,6 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-<<<<<<< HEAD
-            [self.knowledge_area.pk],
-        )
-
-    def test_platform_serializer_empty_academic_programs_clears_derived_knowledge_areas(
-        self,
-    ):
-        """Enviar academic_programs=[] elimina programas y áreas derivadas."""
-=======
             [],
         )
 
@@ -630,7 +549,6 @@ class PlatformSerializersTests(TestCase):
         self,
     ):
         """Enviar academic_programs=[] no administra relaciones derivadas."""
->>>>>>> production
         platform = models.Platform.objects.create(
             name="Plataforma Clasificada",
             created_by=self.system,
@@ -657,20 +575,12 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             platform.academic_program_links.count(),
-<<<<<<< HEAD
-            1,
-=======
             0,
->>>>>>> production
         )
 
         self.assertEqual(
             platform.knowledge_area_links.count(),
-<<<<<<< HEAD
-            1,
-=======
             0,
->>>>>>> production
         )
 
         serializer = serializers.PlatformSerializer(
@@ -846,9 +756,6 @@ class PlatformSerializersTests(TestCase):
 
         self.assertIsNone(
             data["link_status"]["is_active"],
-<<<<<<< HEAD
-        )
-=======
         )
 
     def test_platform_urls_use_latest_non_deleted_general_log(self):
@@ -993,4 +900,3 @@ class PlatformSerializersTests(TestCase):
         self.assertFalse(
             models.Platform.objects.filter(name="creación atómica").exists()
         )
->>>>>>> production

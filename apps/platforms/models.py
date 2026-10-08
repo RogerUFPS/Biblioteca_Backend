@@ -65,8 +65,6 @@ class Platform(AuditableModel):
         blank=True,
         help_text="URL base de la API para cosecha automatizada.",
     )
-<<<<<<< HEAD
-=======
     is_harvestable = models.BooleanField(
         default=False,
         help_text=(
@@ -74,7 +72,6 @@ class Platform(AuditableModel):
             "para esta plataforma."
         ),
     )
->>>>>>> production
     encrypted_api_key = models.TextField(null=True, blank=True)
     url_image = models.URLField(max_length=500, null=True, blank=True)
     

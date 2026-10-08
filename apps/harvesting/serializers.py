@@ -41,6 +41,17 @@ class ScheduleSerializer(serializers.ModelSerializer):
     def validate_platforms(self, value):
         if not value:
             raise serializers.ValidationError("Debes seleccionar al menos una plataforma.")
+        unavailable_platforms = [
+            f"{platform.name} ({platform.pk})"
+            for platform in value
+            if not platform.is_harvestable
+        ]
+        if unavailable_platforms:
+            raise serializers.ValidationError(
+                "Estas plataformas no están habilitadas para cosecha: "
+                + ", ".join(unavailable_platforms)
+                + "."
+            )
         return value
 
     def validate_max_quantity(self, value):

@@ -164,8 +164,6 @@ class PlatformAPITests(APITestCase):
             "encrypted_api_key",
             data,
         )
-<<<<<<< HEAD
-=======
         self.assertNotIn("api_key", data)
         self.assertEqual(data["public_url"], "https://8.8.8.8/scopus")
         self.assertTrue(data["is_harvestable"])
@@ -178,7 +176,6 @@ class PlatformAPITests(APITestCase):
                 url="https://8.8.8.8/scopus",
             ).exists()
         )
->>>>>>> production
 
     def test_publish_action_endpoint(self):
         """Verifica la accion POST /api/platforms/{id}/publish/."""
@@ -324,8 +321,4 @@ class PlatformAPITests(APITestCase):
         self.assertEqual(
             len(data_empty["results"]),
             0,
-<<<<<<< HEAD
         )
-=======
-        )
->>>>>>> production

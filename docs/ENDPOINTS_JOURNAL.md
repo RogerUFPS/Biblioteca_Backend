@@ -155,10 +155,7 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 [
   {
     "platform": 1,
-<<<<<<< HEAD
-=======
     "journal_url": "https://revista.ejemplo.org",
->>>>>>> production
     "start_period": "2020-01-01",
     "finish_period": null,
     "has_full_text": true
@@ -166,8 +163,6 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 ]
 ```
 
-<<<<<<< HEAD
-=======
 En las respuestas, cada relación incluye además:
 
 - `public_url`: URL general navegable de la plataforma, tomada del último `LinkCheckLog` no eliminado cuyo `journal_platform` es nulo.
@@ -177,7 +172,6 @@ Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de est
 
 Omitir `journal_url` en un `PATCH` conserva el historial. Repetir la URL vigente no crea otro log; una URL diferente genera un nuevo registro. La URL puede pertenecer a un dominio distinto al de `public_url`: se valida seguridad SSRF, no igualdad de hostname.
 
->>>>>>> production
 Regla obligatoria:
 
 ```text
@@ -532,8 +526,6 @@ docker compose -f docker/docker-compose.yml exec web python manage.py check
 ```
 
 La autenticación JWT, los permisos y la protección de escritura se implementarán en la Fase B.
-<<<<<<< HEAD
-=======
 # Clasificación académica vigente
 
 El Frontend administra `academic_programs`. `knowledge_areas` es read-only y
@@ -567,4 +559,3 @@ eliminada. Al restaurarla siguen sin aportar hasta que sea republicada.
 Una Journal aporta a Platform solo cuando ella y el vínculo Journal–Platform
 no están eliminados, `active=true` y `validated_at` no es nulo. Los vínculos
 nuevos o restaurados solo se admiten con Platforms en estado `PUBLICADO`.
->>>>>>> production
