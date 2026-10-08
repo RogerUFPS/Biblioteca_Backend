@@ -525,3 +525,34 @@ docker compose -f docker/docker-compose.yml exec web python manage.py check
 ```
 
 La autenticación JWT, los permisos y la protección de escritura se implementarán en la Fase B.
+# Clasificación derivada vigente
+
+El Frontend no administra `academic_programs` ni `knowledge_areas`; ambos son
+read-only. Platform los obtiene de la unión de programas de sus Journals
+elegibles y de las áreas activas de esos programas:
+
+```text
+AcademicProgram ↔ KnowledgeArea       fuente de verdad
+Journal ↔ AcademicProgram             fuente de verdad
+Journal ↔ Platform                    fuente de verdad
+Journal ↔ KnowledgeArea               derivada
+Platform ↔ AcademicProgram            derivada
+Platform ↔ KnowledgeArea              derivada
+```
+
+Una Journal es elegible si `deleted_at=null`, `active=true`,
+`validated_at!=null` y su `SharedJournalPlatform.deleted_at=null`. Las
+relaciones derivadas se conservan con Soft Delete y se restauran cuando vuelven
+a ser válidas.
+
+Una Platform sin Journals elegibles puede conservar su estado `PUBLICADO` y
+clasificación vacía. Si tiene al menos una Journal elegible pero el resultado
+queda sin programas o sin áreas, una Platform publicada pasa automáticamente a
+`BORRADOR`, limpia su validación y deja de aparecer públicamente. Si después
+recupera una clasificación completa permanece en `BORRADOR`; solo la acción
+explícita `publish` puede publicarla nuevamente. Nunca se usa `OBSOLETO` para
+esta invalidación.
+
+Ejemplo de creación/edición: se envían los metadatos y relaciones no académicas
+(`institutions`, `languages`, `countries`, `material_types`), pero se omiten
+`academic_programs` y `knowledge_areas`.
