@@ -321,6 +321,10 @@ class JournalServicesTests(TestCase):
             restored.validated_at
         )
 
+        self.assertFalse(
+            restored.active
+        )
+
     # ==========================================================================
     # RELACIONES SIMPLES
     # ==========================================================================

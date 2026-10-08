@@ -9,7 +9,6 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
-    SharedAcademicProgramKnowledgeArea,
 )
 from apps.core.serializers import (
     RelationConfig,
@@ -167,13 +166,6 @@ class JournalPlatformRelationSerializer(
             attrs.get("start_period"),
             attrs.get("finish_period"),
         )
-
-        platform = attrs.get("platform")
-        if platform:
-            validate_platform_for_journal_association(
-                platform,
-                field_name="platform",
-            )
 
         return attrs
 
@@ -354,40 +346,21 @@ class JournalSerializer(
                 "Una plataforma no puede aparecer más de una vez."
             )
 
+        active_platform_ids = set()
+        if self.instance is not None:
+            active_platform_ids = set(
+                models.SharedJournalPlatform.objects.filter(journal=self.instance)
+                .values_list("platform_id", flat=True)
+            )
+        for item in value:
+            platform = item["platform"]
+            if platform.pk not in active_platform_ids:
+                validate_platform_for_journal_association(
+                    platform,
+                    field_name="platform",
+                )
+
         return value
-
-    def _get_knowledge_areas_from_programs(self, programs):
-        """
-        Deriva las áreas del conocimiento a partir de los programas
-        académicos seleccionados, respetando Soft Delete.
-        """
-        program_ids = {
-            program.pk
-            for program in programs
-        }
-
-        if not program_ids:
-            return []
-
-        knowledge_area_ids = (
-            SharedAcademicProgramKnowledgeArea.objects.filter(
-                academic_program_id__in=program_ids,
-                deleted_at__isnull=True,
-                knowledge_area__deleted_at__isnull=True,
-            )
-            .values_list(
-                "knowledge_area_id",
-                flat=True,
-            )
-            .distinct()
-        )
-
-        return list(
-            KnowledgeArea.objects.filter(
-                pk__in=knowledge_area_ids,
-                deleted_at__isnull=True,
-            )
-        )
 
     def _prepare_relation_data(self, validated_data):
         """
@@ -397,18 +370,7 @@ class JournalSerializer(
         Si academic_programs no viene en un PATCH, ninguna de las dos
         relaciones se modifica.
         """
-        relation_data = self._extract_relation_data(
-            validated_data
-        )
-
-        if "academic_programs" in relation_data:
-            relation_data["knowledge_areas"] = (
-                self._get_knowledge_areas_from_programs(
-                    relation_data["academic_programs"]
-                )
-            )
-
-        return relation_data
+        return self._extract_relation_data(validated_data)
 
     def _validate_platform_periods(self, platform_data):
         """
@@ -502,16 +464,19 @@ class JournalSerializer(
         antes de regresar a la consulta pública.
         """
         if (
-            journal.validated_by_id is None
+            not journal.active
+            and journal.validated_by_id is None
             and journal.validated_at is None
         ):
             return
 
+        journal.active = False
         journal.validated_by = None
         journal.validated_at = None
 
         journal.save(
             update_fields=[
+                "active",
                 "validated_by",
                 "validated_at",
             ]
@@ -545,6 +510,22 @@ class JournalSerializer(
                 relation_data=relation_data,
             )
 
+        from apps.platforms.classification import recalculate_platforms
+        from .classification import recalculate_journals
+
+        recalculate_journals(
+            [journal.pk],
+            user=journal.created_by,
+            invalidate_on_change=False,
+        )
+        recalculate_platforms(
+            {
+                item["platform"].pk
+                for item in relation_data.get("platforms", [])
+            },
+            user=journal.created_by,
+        )
+
         return journal
 
     @transaction.atomic
@@ -553,6 +534,10 @@ class JournalSerializer(
         instance,
         validated_data,
     ):
+        previous_platform_ids = set(
+            models.SharedJournalPlatform.objects.filter(journal=instance)
+            .values_list("platform_id", flat=True)
+        )
         relation_data = self._prepare_relation_data(
             validated_data
         )
@@ -568,7 +553,25 @@ class JournalSerializer(
                 relation_data=relation_data,
             )
 
+        from apps.platforms.classification import recalculate_platforms
+        from .classification import recalculate_journals
+
+        user = journal.updated_by or journal.created_by
+        recalculate_journals(
+            [journal.pk],
+            user=user,
+            invalidate_on_change=False,
+        )
         self._clear_validation(journal)
+
+        current_platform_ids = set(
+            models.SharedJournalPlatform.objects.filter(journal=journal)
+            .values_list("platform_id", flat=True)
+        )
+        recalculate_platforms(
+            previous_platform_ids | current_platform_ids,
+            user=user,
+        )
 
         return journal
 

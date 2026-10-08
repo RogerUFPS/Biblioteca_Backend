@@ -458,6 +458,10 @@ class JournalAPITests(APITestCase):
             journal.is_deleted
         )
 
+        self.assertFalse(
+            journal.active
+        )
+
         self.assertIsNone(
             journal.validated_by
         )

@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.utils import timezone
 from drf_spectacular.utils import (
     extend_schema,
@@ -11,10 +12,13 @@ from rest_framework.response import Response
 
 from apps.core.viewsets import (
     AuditableViewSet,
+    DeleteSerializer,
     get_acting_user,
 )
 
 from . import filters, models, serializers
+from apps.platforms.classification import recalculate_platforms
+from .classification import related_platform_ids
 
 
 @extend_schema_view(
@@ -132,6 +136,23 @@ class JournalViewSet(AuditableViewSet):
         "fetched_at",
     ]
 
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        journal = self.get_object()
+        body = DeleteSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        user = get_acting_user(request)
+        platform_ids = related_platform_ids([journal.pk])
+        journal.soft_delete(
+            user=user,
+            explanation=body.validated_data["delete_explanation"],
+        )
+        recalculate_platforms(platform_ids, user=user)
+        return Response(
+            {"detail": "La revista fue eliminada lógicamente.", "permanent": False},
+            status=status.HTTP_200_OK,
+        )
+
     @extend_schema(
         summary="Validar y publicar revista",
         description=(
@@ -149,6 +170,7 @@ class JournalViewSet(AuditableViewSet):
         methods=["post"],
         url_path="publish",
     )
+    @transaction.atomic
     def publish(self, request, pk=None):
         journal = self.get_object()
         user = get_acting_user(request)
@@ -169,6 +191,7 @@ class JournalViewSet(AuditableViewSet):
                 "updated_at",
             ]
         )
+        recalculate_platforms(related_platform_ids([journal.pk]), user=user)
 
         return Response(
             self.get_serializer(journal).data,
@@ -193,6 +216,7 @@ class JournalViewSet(AuditableViewSet):
         methods=["post"],
         url_path="deactivate",
     )
+    @transaction.atomic
     def deactivate(self, request, pk=None):
         journal = self.get_object()
         user = get_acting_user(request)
@@ -209,6 +233,7 @@ class JournalViewSet(AuditableViewSet):
                 "updated_at",
             ]
         )
+        recalculate_platforms(related_platform_ids([journal.pk]), user=user)
 
         return Response(
             self.get_serializer(journal).data,
@@ -234,6 +259,7 @@ class JournalViewSet(AuditableViewSet):
         methods=["post"],
         url_path="restore",
     )
+    @transaction.atomic
     def restore(self, request, pk=None):
         model = self.queryset.model
 
@@ -260,6 +286,7 @@ class JournalViewSet(AuditableViewSet):
 
         # Una revista restaurada debe validarse nuevamente
         # antes de regresar a la exploración pública.
+        journal.active = False
         journal.validated_by = None
         journal.validated_at = None
         journal.updated_by = user
@@ -267,12 +294,14 @@ class JournalViewSet(AuditableViewSet):
 
         journal.save(
             update_fields=[
+                "active",
                 "validated_by",
                 "validated_at",
                 "updated_by",
                 "updated_at",
             ]
         )
+        recalculate_platforms(related_platform_ids([journal.pk]), user=user)
 
         return Response(
             self.get_serializer(journal).data,
