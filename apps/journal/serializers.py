@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Prefetch
 from rest_framework import serializers
 
 from drf_spectacular.utils import extend_schema_field
@@ -9,14 +10,14 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
-    SharedAcademicProgramKnowledgeArea,
 )
 from apps.core.serializers import (
     RelationConfig,
     SoftDeleteRelationSyncMixin,
 )
 from apps.core.viewsets import ArchivedNameMixin
-from apps.platforms.models import Platform
+from apps.platforms import services as platform_services
+from apps.platforms.models import LinkCheckLog, Platform
 
 from . import models
 from .services import validate_platform_for_journal_association
@@ -60,6 +61,61 @@ JOURNAL_RELATION_CONFIG = (
         ordering=("platform__name",),
     ),
 )
+
+
+def _journal_platform_links(instance, *, published_only=False):
+    prefetched = getattr(instance, "_url_platform_links", None)
+    if prefetched is not None:
+        if not published_only:
+            return prefetched
+        return [
+            link for link in prefetched
+            if link.platform.status == Platform.Status.PUBLICADO
+        ]
+
+    queryset = (
+        models.SharedJournalPlatform.objects
+        .filter(journal=instance, platform__deleted_at__isnull=True)
+        .select_related("platform")
+        .prefetch_related(
+            Prefetch(
+                "platform__link_check_logs",
+                queryset=(
+                    LinkCheckLog.objects
+                    .filter(journal_platform__isnull=True)
+                    .order_by(*platform_services.LINK_LOG_ORDERING)
+                ),
+                to_attr="_public_link_logs",
+            ),
+            Prefetch(
+                "link_check_logs",
+                queryset=LinkCheckLog.objects.order_by(
+                    *platform_services.LINK_LOG_ORDERING
+                ),
+                to_attr="_journal_link_logs",
+            ),
+        )
+    )
+    if published_only:
+        queryset = queryset.filter(platform__status=Platform.Status.PUBLICADO)
+    return queryset.order_by("platform__name")
+
+
+def _represent_journal_platform(link, *, include_relation_key=False):
+    public_log = platform_services.latest_platform_link_log(link.platform)
+    journal_log = platform_services.latest_journal_link_log(link)
+    data = {
+        "id": link.platform_id,
+        "name": link.platform.name,
+        "public_url": public_log.url if public_log else None,
+        "journal_url": journal_log.url if journal_log else None,
+        "start_period": link.start_period,
+        "finish_period": link.finish_period,
+        "has_full_text": link.has_full_text,
+    }
+    if include_relation_key:
+        data["platform"] = link.platform_id
+    return data
 
 
 AUDIT_FIELDS = (
@@ -162,18 +218,28 @@ class JournalPlatformRelationSerializer(
         required=False,
     )
 
+    public_url = serializers.URLField(read_only=True, allow_null=True)
+    journal_url = serializers.URLField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "URL pública de la revista dentro de esta plataforma. "
+            "Se conserva en LinkCheckLog."
+        ),
+    )
+
+    def validate_journal_url(self, value):
+        platform_services.validate_safe_http_url(
+            value,
+            field_name="journal_url",
+        )
+        return value
+
     def validate(self, attrs):
         _validate_period(
             attrs.get("start_period"),
             attrs.get("finish_period"),
         )
-
-        platform = attrs.get("platform")
-        if platform:
-            validate_platform_for_journal_association(
-                platform,
-                field_name="platform",
-            )
 
         return attrs
 
@@ -354,40 +420,21 @@ class JournalSerializer(
                 "Una plataforma no puede aparecer más de una vez."
             )
 
+        active_platform_ids = set()
+        if self.instance is not None:
+            active_platform_ids = set(
+                models.SharedJournalPlatform.objects.filter(journal=self.instance)
+                .values_list("platform_id", flat=True)
+            )
+        for item in value:
+            platform = item["platform"]
+            if platform.pk not in active_platform_ids:
+                validate_platform_for_journal_association(
+                    platform,
+                    field_name="platform",
+                )
+
         return value
-
-    def _get_knowledge_areas_from_programs(self, programs):
-        """
-        Deriva las áreas del conocimiento a partir de los programas
-        académicos seleccionados, respetando Soft Delete.
-        """
-        program_ids = {
-            program.pk
-            for program in programs
-        }
-
-        if not program_ids:
-            return []
-
-        knowledge_area_ids = (
-            SharedAcademicProgramKnowledgeArea.objects.filter(
-                academic_program_id__in=program_ids,
-                deleted_at__isnull=True,
-                knowledge_area__deleted_at__isnull=True,
-            )
-            .values_list(
-                "knowledge_area_id",
-                flat=True,
-            )
-            .distinct()
-        )
-
-        return list(
-            KnowledgeArea.objects.filter(
-                pk__in=knowledge_area_ids,
-                deleted_at__isnull=True,
-            )
-        )
 
     def _prepare_relation_data(self, validated_data):
         """
@@ -397,18 +444,7 @@ class JournalSerializer(
         Si academic_programs no viene en un PATCH, ninguna de las dos
         relaciones se modifica.
         """
-        relation_data = self._extract_relation_data(
-            validated_data
-        )
-
-        if "academic_programs" in relation_data:
-            relation_data["knowledge_areas"] = (
-                self._get_knowledge_areas_from_programs(
-                    relation_data["academic_programs"]
-                )
-            )
-
-        return relation_data
+        return self._extract_relation_data(validated_data)
 
     def _validate_platform_periods(self, platform_data):
         """
@@ -491,10 +527,15 @@ class JournalSerializer(
     def to_representation(self, instance):
         representation = super().to_representation(instance)
 
-        return self._represent_relations(
+        representation = self._represent_relations(
             instance=instance,
             representation=representation,
         )
+        representation["platforms"] = [
+            _represent_journal_platform(link, include_relation_key=True)
+            for link in _journal_platform_links(instance)
+        ]
+        return representation
 
     def _clear_validation(self, journal):
         """
@@ -502,20 +543,51 @@ class JournalSerializer(
         antes de regresar a la consulta pública.
         """
         if (
-            journal.validated_by_id is None
+            not journal.active
+            and journal.validated_by_id is None
             and journal.validated_at is None
         ):
             return
 
+        journal.active = False
         journal.validated_by = None
         journal.validated_at = None
 
         journal.save(
             update_fields=[
+                "active",
                 "validated_by",
                 "validated_at",
             ]
         )
+
+    def _sync_platform_urls(self, journal, platform_data):
+        if not platform_data:
+            return
+
+        user = journal.updated_by or journal.created_by
+        links_by_platform = {
+            link.platform_id: link
+            for link in models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform_id__in=[
+                    item["platform"].pk
+                    for item in platform_data
+                    if item.get("journal_url") is not None
+                ],
+            ).select_related("platform")
+        }
+
+        for item in platform_data:
+            if item.get("journal_url") is None:
+                continue
+            link = links_by_platform[item["platform"].pk]
+            platform_services.register_link_url(
+                platform=link.platform,
+                journal_platform=link,
+                url=item["journal_url"],
+                user=user,
+            )
 
     @transaction.atomic
     def create(self, validated_data):
@@ -544,6 +616,26 @@ class JournalSerializer(
                 parent=journal,
                 relation_data=relation_data,
             )
+            self._sync_platform_urls(
+                journal,
+                relation_data.get("platforms"),
+            )
+
+        from apps.platforms.classification import recalculate_platforms
+        from .classification import recalculate_journals
+
+        recalculate_journals(
+            [journal.pk],
+            user=journal.created_by,
+            invalidate_on_change=False,
+        )
+        recalculate_platforms(
+            {
+                item["platform"].pk
+                for item in relation_data.get("platforms", [])
+            },
+            user=journal.created_by,
+        )
 
         return journal
 
@@ -553,6 +645,10 @@ class JournalSerializer(
         instance,
         validated_data,
     ):
+        previous_platform_ids = set(
+            models.SharedJournalPlatform.objects.filter(journal=instance)
+            .values_list("platform_id", flat=True)
+        )
         relation_data = self._prepare_relation_data(
             validated_data
         )
@@ -567,8 +663,30 @@ class JournalSerializer(
                 parent=journal,
                 relation_data=relation_data,
             )
+            self._sync_platform_urls(
+                journal,
+                relation_data.get("platforms"),
+            )
 
+        from apps.platforms.classification import recalculate_platforms
+        from .classification import recalculate_journals
+
+        user = journal.updated_by or journal.created_by
+        recalculate_journals(
+            [journal.pk],
+            user=user,
+            invalidate_on_change=False,
+        )
         self._clear_validation(journal)
+
+        current_platform_ids = set(
+            models.SharedJournalPlatform.objects.filter(journal=journal)
+            .values_list("platform_id", flat=True)
+        )
+        recalculate_platforms(
+            previous_platform_ids | current_platform_ids,
+            user=user,
+        )
 
         return journal
 
@@ -624,9 +742,13 @@ class JournalPublicPlatformSchemaSerializer(
 ):
     id = serializers.IntegerField()
     name = serializers.CharField()
-    base_api_url = serializers.URLField(
-        allow_blank=True,
+    public_url = serializers.URLField(
         allow_null=True,
+        read_only=True,
+    )
+    journal_url = serializers.URLField(
+        allow_null=True,
+        read_only=True,
     )
     start_period = serializers.DateField(
         allow_null=True,
@@ -775,39 +897,7 @@ class JournalPublicSerializer(
         JournalPublicPlatformSchemaSerializer(many=True)
     )
     def get_platforms(self, obj):
-        links = (
-            models.SharedJournalPlatform.objects
-            .filter(
-                journal=obj,
-                platform__deleted_at__isnull=True,
-                platform__status=(
-                    Platform.Status.PUBLICADO
-                ),
-            )
-            .select_related(
-                "platform"
-            )
-            .order_by(
-                "platform__name"
-            )
-        )
-
         return [
-            {
-                "id": link.platform_id,
-                "name": link.platform.name,
-                "base_api_url": (
-                    link.platform.base_api_url
-                ),
-                "start_period": (
-                    link.start_period
-                ),
-                "finish_period": (
-                    link.finish_period
-                ),
-                "has_full_text": (
-                    link.has_full_text
-                ),
-            }
-            for link in links
+            _represent_journal_platform(link)
+            for link in _journal_platform_links(obj, published_only=True)
         ]

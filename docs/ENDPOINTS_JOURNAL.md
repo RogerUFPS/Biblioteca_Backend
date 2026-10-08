@@ -155,12 +155,22 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 [
   {
     "platform": 1,
+    "journal_url": "https://revista.ejemplo.org",
     "start_period": "2020-01-01",
     "finish_period": null,
     "has_full_text": true
   }
 ]
 ```
+
+En las respuestas, cada relación incluye además:
+
+- `public_url`: URL general navegable de la plataforma, tomada del último `LinkCheckLog` no eliminado cuyo `journal_platform` es nulo.
+- `journal_url`: campo virtual opcional de escritura y respuesta. La URL se toma del último `LinkCheckLog` no eliminado asociado al `SharedJournalPlatform` correspondiente.
+
+Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de estos valores se obtiene de `base_api_url`, que está reservado para harvesting, ni se persiste en `Journal`, `Platform` o `SharedJournalPlatform`.
+
+Omitir `journal_url` en un `PATCH` conserva el historial. Repetir la URL vigente no crea otro log; una URL diferente genera un nuevo registro. La URL puede pertenecer a un dominio distinto al de `public_url`: se valida seguridad SSRF, no igualdad de hostname.
 
 Regla obligatoria:
 
@@ -516,3 +526,36 @@ docker compose -f docker/docker-compose.yml exec web python manage.py check
 ```
 
 La autenticación JWT, los permisos y la protección de escritura se implementarán en la Fase B.
+# Clasificación académica vigente
+
+El Frontend administra `academic_programs`. `knowledge_areas` es read-only y
+se calcula como la unión sin duplicados de las áreas activas de los programas
+activos asociados. Por ejemplo:
+
+```json
+{
+  "issn": "1234-5678",
+  "title": "Revista de ejemplo",
+  "academic_programs": [1, 4]
+}
+```
+
+No se debe enviar `knowledge_areas`. Un `PATCH` que omite
+`academic_programs` conserva la clasificación; una lista vacía elimina
+lógicamente los vínculos fuente y las áreas derivadas.
+
+Toda edición que requiere revisión deja la Journal con `active=false`,
+`validated_by=null` y `validated_at=null`. Esto la excluye inmediatamente de
+la clasificación de sus Platforms. La acción `publish` vuelve a validarla y
+recalcula dichas Platforms. El borrado y la restauración son lógicos; una
+Journal restaurada permanece inactiva y sin validar hasta una publicación
+explícita.
+
+La arquitectura actual no realiza cascada lógica automática sobre
+`SharedJournalPlatform` al eliminar una Journal; conserva esos vínculos
+históricos activos, pero dejan de aportar clasificación porque la Journal está
+eliminada. Al restaurarla siguen sin aportar hasta que sea republicada.
+
+Una Journal aporta a Platform solo cuando ella y el vínculo Journal–Platform
+no están eliminados, `active=true` y `validated_at` no es nulo. Los vínculos
+nuevos o restaurados solo se admiten con Platforms en estado `PUBLICADO`.

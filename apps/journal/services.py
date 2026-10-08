@@ -8,14 +8,17 @@ from apps.catalog.models import (
     AcademicProgram,
     Country,
     Editorial,
-    KnowledgeArea,
     Language,
     MaterialType,
-    SharedAcademicProgramKnowledgeArea,
 )
 from apps.platforms.models import Platform
 
 from . import models
+from .classification import (
+    recalculate_journals,
+    related_platform_ids,
+)
+from apps.platforms.classification import recalculate_platforms
 
 
 JOURNAL_RELATION_CONFIG = (
@@ -73,47 +76,6 @@ def validate_platform_for_journal_association(
                 )
             }
         )
-
-
-def _get_knowledge_area_ids_from_academic_programs(
-    academic_program_ids: list[int],
-) -> list[int]:
-    """
-    Obtiene la unión sin duplicados de áreas del conocimiento asociadas
-    a los programas académicos suministrados, respetando Soft Delete.
-    """
-    unique_program_ids = set(academic_program_ids)
-
-    if not unique_program_ids:
-        return []
-
-    existing_program_ids = set(
-        AcademicProgram.objects
-        .filter(pk__in=unique_program_ids)
-        .values_list("pk", flat=True)
-    )
-
-    missing_ids = unique_program_ids - existing_program_ids
-
-    if missing_ids:
-        raise ValidationError(
-            {
-                "academic_program_ids": (
-                    "Los siguientes IDs no existen o se encuentran eliminados: "
-                    f"{sorted(missing_ids)}."
-                )
-            }
-        )
-
-    return list(
-        SharedAcademicProgramKnowledgeArea.objects.filter(
-            academic_program_id__in=unique_program_ids,
-            deleted_at__isnull=True,
-            knowledge_area__deleted_at__isnull=True,
-        )
-        .values_list("knowledge_area_id", flat=True)
-        .distinct()
-    )
 
 
 def _normalize_issn(issn: str) -> str:
@@ -368,11 +330,6 @@ def _sync_source_platform(
             }
         )
 
-    validate_platform_for_journal_association(
-        platform,
-        field_name="platform_id",
-    )
-
     active_link = (
         models.SharedJournalPlatform.objects
         .filter(
@@ -436,6 +393,11 @@ def _sync_source_platform(
         )
 
         return
+
+    validate_platform_for_journal_association(
+        platform,
+        field_name="platform_id",
+    )
 
     archived_link = (
         models.SharedJournalPlatform.all_objects
@@ -739,12 +701,14 @@ def create_journal(
             )
 
         if was_deleted:
+            journal.active = False
             # Una revista restaurada requiere una nueva validación.
             journal.validated_by = None
             journal.validated_at = None
 
             update_fields.extend(
                 [
+                    "active",
                     "validated_by",
                     "validated_at",
                 ]
@@ -799,23 +763,6 @@ def create_journal(
             user=user,
         )
 
-    if academic_program_ids is not None:
-        derived_knowledge_area_ids = (
-            _get_knowledge_area_ids_from_academic_programs(
-                academic_program_ids
-            )
-        )
-
-        _sync_relation_ids(
-            journal=journal,
-            ids=derived_knowledge_area_ids,
-            through_model=models.SharedJournalKnowledgeArea,
-            relation_field="knowledge_area",
-            target_model=KnowledgeArea,
-            input_field="knowledge_area_ids",
-            user=user,
-        )
-
     if platform_id is not None:
         _sync_source_platform(
             journal=journal,
@@ -825,5 +772,23 @@ def create_journal(
             has_full_text=has_full_text,
             user=user,
         )
+
+    recalculate_journals(
+        [journal.pk],
+        user=user,
+        invalidate_on_change=False,
+    )
+
+    if not created and (journal.active or journal.validated_at is not None):
+        journal.active = False
+        journal.validated_by = None
+        journal.validated_at = None
+        journal.updated_by = user
+        journal.updated_at = now
+        journal.save(update_fields=[
+            "active", "validated_by", "validated_at", "updated_by", "updated_at",
+        ])
+
+    recalculate_platforms(related_platform_ids([journal.pk]), user=user)
 
     return journal

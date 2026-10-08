@@ -16,6 +16,103 @@ LINK_CHECK_TIMEOUT_SECONDS = 10.0
 # Estos códigos indican que el servidor/recurso existe,
 # aunque requiera autenticación o restrinja el acceso.
 LINK_ACTIVE_AUTH_STATUSES = {401, 403}
+LINK_LOG_ORDERING = ("-last_check", "-created_at", "-pk")
+BLOCKED_METADATA_HOSTS = {
+    "instance-data.ec2.internal",
+    "metadata.azure.internal",
+    "metadata.google.internal",
+}
+
+
+def latest_platform_link_log(platform):
+    """Retorna el último log no eliminado de la URL general."""
+    prefetched = getattr(platform, "_public_link_logs", None)
+    if prefetched is not None:
+        return prefetched[0] if prefetched else None
+
+    return (
+        models.LinkCheckLog.objects
+        .filter(platform=platform, journal_platform__isnull=True)
+        .order_by(*LINK_LOG_ORDERING)
+        .first()
+    )
+
+
+def latest_journal_link_log(journal_platform):
+    """Retorna el último log no eliminado de una revista-plataforma."""
+    prefetched = getattr(journal_platform, "_journal_link_logs", None)
+    if prefetched is not None:
+        return prefetched[0] if prefetched else None
+
+    return (
+        models.LinkCheckLog.objects
+        .filter(journal_platform=journal_platform)
+        .order_by(*LINK_LOG_ORDERING)
+        .first()
+    )
+
+
+def register_link_url(
+    *,
+    platform: models.Platform,
+    url: str,
+    user,
+    journal_platform=None,
+) -> models.LinkCheckLog:
+    """
+    Registra una URL nueva sin sobrescribir el historial.
+
+    Si la URL coincide con la vigente para el mismo contexto, reutiliza
+    el log actual y evita crear un registro redundante.
+    """
+    validate_safe_http_url(url)
+
+    if journal_platform is None:
+        latest_log = (
+            models.LinkCheckLog.objects
+            .filter(platform=platform, journal_platform__isnull=True)
+            .order_by(*LINK_LOG_ORDERING)
+            .first()
+        )
+    else:
+        if journal_platform.deleted_at is not None:
+            raise ValidationError({
+                "journal_url": (
+                    "No se puede registrar una URL para una relación "
+                    "revista-plataforma archivada."
+                )
+            })
+        if journal_platform.platform_id != platform.pk:
+            raise ValidationError({
+                "journal_platform": (
+                    "La relación revista-plataforma debe pertenecer a la "
+                    "misma plataforma del enlace."
+                )
+            })
+        latest_log = (
+            models.LinkCheckLog.objects
+            .filter(journal_platform=journal_platform)
+            .order_by(*LINK_LOG_ORDERING)
+            .first()
+        )
+
+    if latest_log is not None and latest_log.url == url:
+        return latest_log
+
+    link_log = models.LinkCheckLog.objects.create(
+        platform=platform,
+        journal_platform=journal_platform,
+        url=url,
+        created_by=user,
+    )
+    if hasattr(platform, "_public_link_logs"):
+        delattr(platform, "_public_link_logs")
+    if (
+        journal_platform is not None
+        and hasattr(journal_platform, "_journal_link_logs")
+    ):
+        delattr(journal_platform, "_journal_link_logs")
+    return link_log
 
 
 REQUIRED_PLATFORM_RELATIONS = (
@@ -32,12 +129,6 @@ REQUIRED_PLATFORM_RELATIONS = (
         "un país activo asociado",
     ),
     (
-        "knowledge_areas",
-        models.SharedPlatformKnowledgeArea,
-        "knowledge_area",
-        "un área del conocimiento activa asociada",
-    ),
-    (
         "material_types",
         models.SharedPlatformMaterialType,
         "material_type",
@@ -48,12 +139,6 @@ REQUIRED_PLATFORM_RELATIONS = (
         models.SharedPlatformLanguage,
         "language",
         "un idioma activo asociado",
-    ),
-    (
-        "academic_programs",
-        models.SharedPlatformAcademicProgram,
-        "academic_program",
-        "un programa académico activo asociado",
     ),
 )
 
@@ -86,6 +171,7 @@ def validate_platform_for_publication(
     # Debe existir al menos una verificación registrada en el historial.
     if not models.LinkCheckLog.objects.filter(
         platform=platform,
+        journal_platform__isnull=True,
     ).exists():
         errors["url"] = (
             "La plataforma debe tener una URL pública registrada "
@@ -99,6 +185,19 @@ def validate_platform_for_publication(
                 "La plataforma debe tener una URL de API "
                 "si tiene una API Key configurada."
             )
+
+    if platform.is_harvestable and not platform.base_api_url:
+        errors["base_api_url"] = (
+            "Una plataforma cosechable debe tener una URL base de API."
+        )
+
+    if not platform.is_harvestable and (
+        platform.base_api_url or platform.encrypted_api_key
+    ):
+        errors["is_harvestable"] = (
+            "Una plataforma no cosechable no puede conservar "
+            "configuración técnica de cosecha."
+        )
 
     # Si no tiene API Key, base_api_url es completamente opcional.
 
@@ -127,6 +226,30 @@ def validate_platform_for_publication(
         errors["valid_sintaxis"] = (
             "La sintaxis de búsqueda asociada no se encuentra activa."
         )
+
+    from apps.journal.models import SharedJournalPlatform
+
+    has_eligible_journals = SharedJournalPlatform.objects.filter(
+        platform=platform,
+        journal__deleted_at__isnull=True,
+        journal__active=True,
+        journal__validated_at__isnull=False,
+    ).exists()
+    if has_eligible_journals:
+        if not models.SharedPlatformAcademicProgram.objects.filter(
+            platform=platform,
+            academic_program__deleted_at__isnull=True,
+        ).exists():
+            errors["academic_programs"] = (
+                "Las revistas elegibles deben aportar al menos un programa académico."
+            )
+        if not models.SharedPlatformKnowledgeArea.objects.filter(
+            platform=platform,
+            knowledge_area__deleted_at__isnull=True,
+        ).exists():
+            errors["knowledge_areas"] = (
+                "Las revistas elegibles deben aportar al menos un área del conocimiento."
+            )
 
     for (
         field_name,
@@ -240,7 +363,7 @@ def _is_public_ip_address(
     )
 
 
-def _validate_safe_http_url(
+def validate_safe_http_url(
     url: str,
     *,
     field_name: str = "url",
@@ -291,6 +414,7 @@ def _validate_safe_http_url(
         hostname == "localhost"
         or hostname.endswith(".localhost")
         or hostname.endswith(".local")
+        or hostname in BLOCKED_METADATA_HOSTS
     ):
         raise ValidationError({
             field_name: (
@@ -344,6 +468,10 @@ def _validate_safe_http_url(
             })
 
 
+# Compatibilidad interna con el checker y sus pruebas existentes.
+_validate_safe_http_url = validate_safe_http_url
+
+
 def _get_next_fail_count(
     platform: models.Platform,
     *,
@@ -364,9 +492,10 @@ def _get_next_fail_count(
         models.LinkCheckLog.objects
         .filter(
             platform=platform,
+            journal_platform__isnull=True,
             url=url,
         )
-        .order_by("-last_check", "-pk")
+        .order_by(*LINK_LOG_ORDERING)
         .first()
     )
 
@@ -560,8 +689,11 @@ def check_platform_link(
     if url is None or not str(url).strip():
         latest_log = (
             models.LinkCheckLog.objects
-            .filter(platform=platform_snapshot)
-            .order_by("-last_check", "-pk")
+            .filter(
+                platform=platform_snapshot,
+                journal_platform__isnull=True,
+            )
+            .order_by(*LINK_LOG_ORDERING)
             .first()
         )
 
@@ -606,6 +738,7 @@ def check_platform_link(
 
         link_log = models.LinkCheckLog.objects.create(
             platform=current_platform,
+            journal_platform=None,
             url=resolved_url,
             fail_count=fail_count,
             http_status_code=status_code,
