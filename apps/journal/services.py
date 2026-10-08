@@ -10,6 +10,7 @@ from apps.catalog.models import (
     Editorial,
     Language,
     MaterialType,
+    SharedAcademicProgramKnowledgeArea,
 )
 from apps.platforms.models import Platform
 
@@ -329,6 +330,11 @@ def _sync_source_platform(
                 )
             }
         )
+
+    validate_platform_for_journal_association(
+        platform,
+        field_name="platform_id",
+    )
 
     active_link = (
         models.SharedJournalPlatform.objects

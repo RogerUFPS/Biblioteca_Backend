@@ -107,6 +107,12 @@ class OpenAlexHarvester:
         """
         Ejecuta el ciclo de recolección para la cosecha configurada.
         """
+        if not self.harvest.platform.is_harvestable:
+            raise ValueError(
+                f"La plataforma '{self.harvest.platform.name}' "
+                "no está habilitada para cosecha (is_harvestable=false)."
+            )
+
         with transaction.atomic():
             harvest = models.Harvest.objects.select_for_update().get(pk=self.harvest.pk)
             if harvest.state != models.Harvest.State.PENDING:
@@ -370,6 +376,12 @@ def get_harvester_for_platform(harvest: models.Harvest, **kwargs) -> OpenAlexHar
     """
     Factoría que selecciona el recolector adecuado según la plataforma.
     """
+    if not harvest.platform.is_harvestable:
+        raise ValueError(
+            f"La plataforma '{harvest.platform.name}' "
+            "no está habilitada para cosecha (is_harvestable=false)."
+        )
+
     platform_name = (harvest.platform.name or "").lower()
     base_url = (harvest.platform.base_api_url or "").lower()
 
@@ -461,6 +473,14 @@ def _run_schedule_event(event: models.ScheduleEvent) -> list[models.Harvest]:
                 harvest.pk,
                 event.pk,
             )
+            harvest.refresh_from_db()
+            if harvest.state == models.Harvest.State.PENDING:
+                harvest.state = models.Harvest.State.FAILED
+                harvest.finished_at = timezone.now()
+                harvest.error_message = str(exc)
+                harvest.save(
+                    update_fields=["state", "finished_at", "error_message"],
+                )
             failures.append(str(exc))
 
     event.refresh_from_db()
