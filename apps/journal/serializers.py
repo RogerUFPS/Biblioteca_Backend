@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Prefetch
 from rest_framework import serializers
 
 from drf_spectacular.utils import extend_schema_field
@@ -15,7 +16,8 @@ from apps.core.serializers import (
     SoftDeleteRelationSyncMixin,
 )
 from apps.core.viewsets import ArchivedNameMixin
-from apps.platforms.models import Platform
+from apps.platforms import services as platform_services
+from apps.platforms.models import LinkCheckLog, Platform
 
 from . import models
 from .services import validate_platform_for_journal_association
@@ -59,6 +61,61 @@ JOURNAL_RELATION_CONFIG = (
         ordering=("platform__name",),
     ),
 )
+
+
+def _journal_platform_links(instance, *, published_only=False):
+    prefetched = getattr(instance, "_url_platform_links", None)
+    if prefetched is not None:
+        if not published_only:
+            return prefetched
+        return [
+            link for link in prefetched
+            if link.platform.status == Platform.Status.PUBLICADO
+        ]
+
+    queryset = (
+        models.SharedJournalPlatform.objects
+        .filter(journal=instance, platform__deleted_at__isnull=True)
+        .select_related("platform")
+        .prefetch_related(
+            Prefetch(
+                "platform__link_check_logs",
+                queryset=(
+                    LinkCheckLog.objects
+                    .filter(journal_platform__isnull=True)
+                    .order_by(*platform_services.LINK_LOG_ORDERING)
+                ),
+                to_attr="_public_link_logs",
+            ),
+            Prefetch(
+                "link_check_logs",
+                queryset=LinkCheckLog.objects.order_by(
+                    *platform_services.LINK_LOG_ORDERING
+                ),
+                to_attr="_journal_link_logs",
+            ),
+        )
+    )
+    if published_only:
+        queryset = queryset.filter(platform__status=Platform.Status.PUBLICADO)
+    return queryset.order_by("platform__name")
+
+
+def _represent_journal_platform(link, *, include_relation_key=False):
+    public_log = platform_services.latest_platform_link_log(link.platform)
+    journal_log = platform_services.latest_journal_link_log(link)
+    data = {
+        "id": link.platform_id,
+        "name": link.platform.name,
+        "public_url": public_log.url if public_log else None,
+        "journal_url": journal_log.url if journal_log else None,
+        "start_period": link.start_period,
+        "finish_period": link.finish_period,
+        "has_full_text": link.has_full_text,
+    }
+    if include_relation_key:
+        data["platform"] = link.platform_id
+    return data
 
 
 AUDIT_FIELDS = (
@@ -160,6 +217,9 @@ class JournalPlatformRelationSerializer(
     has_full_text = serializers.BooleanField(
         required=False,
     )
+
+    public_url = serializers.URLField(read_only=True, allow_null=True)
+    journal_url = serializers.URLField(read_only=True, allow_null=True)
 
     def validate(self, attrs):
         _validate_period(
@@ -453,10 +513,15 @@ class JournalSerializer(
     def to_representation(self, instance):
         representation = super().to_representation(instance)
 
-        return self._represent_relations(
+        representation = self._represent_relations(
             instance=instance,
             representation=representation,
         )
+        representation["platforms"] = [
+            _represent_journal_platform(link, include_relation_key=True)
+            for link in _journal_platform_links(instance)
+        ]
+        return representation
 
     def _clear_validation(self, journal):
         """
@@ -627,9 +692,13 @@ class JournalPublicPlatformSchemaSerializer(
 ):
     id = serializers.IntegerField()
     name = serializers.CharField()
-    base_api_url = serializers.URLField(
-        allow_blank=True,
+    public_url = serializers.URLField(
         allow_null=True,
+        read_only=True,
+    )
+    journal_url = serializers.URLField(
+        allow_null=True,
+        read_only=True,
     )
     start_period = serializers.DateField(
         allow_null=True,
@@ -778,39 +847,7 @@ class JournalPublicSerializer(
         JournalPublicPlatformSchemaSerializer(many=True)
     )
     def get_platforms(self, obj):
-        links = (
-            models.SharedJournalPlatform.objects
-            .filter(
-                journal=obj,
-                platform__deleted_at__isnull=True,
-                platform__status=(
-                    Platform.Status.PUBLICADO
-                ),
-            )
-            .select_related(
-                "platform"
-            )
-            .order_by(
-                "platform__name"
-            )
-        )
-
         return [
-            {
-                "id": link.platform_id,
-                "name": link.platform.name,
-                "base_api_url": (
-                    link.platform.base_api_url
-                ),
-                "start_period": (
-                    link.start_period
-                ),
-                "finish_period": (
-                    link.finish_period
-                ),
-                "has_full_text": (
-                    link.has_full_text
-                ),
-            }
-            for link in links
+            _represent_journal_platform(link)
+            for link in _journal_platform_links(obj, published_only=True)
         ]

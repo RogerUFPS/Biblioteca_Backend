@@ -1,6 +1,8 @@
 from datetime import date
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.account.models import User
 from apps.catalog.models import (
@@ -13,7 +15,7 @@ from apps.catalog.models import (
     SharedAcademicProgramKnowledgeArea,
 )
 from apps.journal import models, serializers
-from apps.platforms.models import Platform
+from apps.platforms.models import LinkCheckLog, Platform
 
 
 class JournalSerializersTests(TestCase):
@@ -1046,9 +1048,94 @@ class JournalSerializersTests(TestCase):
             {
                 "id": self.platform.pk,
                 "name": self.platform.name,
-                "base_api_url": self.platform.base_api_url,
+                "public_url": None,
+                "journal_url": None,
                 "start_period": date(2020, 1, 1),
                 "finish_period": date(2026, 12, 31),
                 "has_full_text": True,
             },
         )
+
+    def test_journal_platforms_expose_distinct_public_and_journal_urls(self):
+        journal = self._journal(active=True)
+        second_platform = Platform.objects.create(
+            name="Otra plataforma",
+            status=Platform.Status.PUBLICADO,
+            base_api_url="https://api.other.test",
+            created_by=self.system,
+        )
+        first_link = models.SharedJournalPlatform.objects.create(
+            journal=journal,
+            platform=self.platform,
+            created_by=self.system,
+        )
+        second_link = models.SharedJournalPlatform.objects.create(
+            journal=journal,
+            platform=second_platform,
+            created_by=self.system,
+        )
+        for platform, public_url in (
+            (self.platform, "https://public.first.test"),
+            (second_platform, "https://public.second.test"),
+        ):
+            LinkCheckLog.objects.create(
+                platform=platform,
+                url=public_url,
+                last_check=timezone.now(),
+                created_by=self.system,
+            )
+        LinkCheckLog.objects.create(
+            platform=self.platform,
+            journal_platform=first_link,
+            url="https://public.first.test/journal",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+        LinkCheckLog.objects.create(
+            platform=second_platform,
+            journal_platform=second_link,
+            url="https://public.second.test/journal",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+
+        data = serializers.JournalPublicSerializer(journal).data
+        urls = {
+            item["id"]: (item["public_url"], item["journal_url"])
+            for item in data["platforms"]
+        }
+
+        self.assertEqual(
+            urls[self.platform.pk],
+            ("https://public.first.test", "https://public.first.test/journal"),
+        )
+        self.assertEqual(
+            urls[second_platform.pk],
+            ("https://public.second.test", "https://public.second.test/journal"),
+        )
+
+    def test_link_log_rejects_mismatched_platform_relation(self):
+        journal = self._journal()
+        other_platform = Platform.objects.create(
+            name="Plataforma inconsistente",
+            status=Platform.Status.PUBLICADO,
+            created_by=self.system,
+        )
+        link = models.SharedJournalPlatform.objects.create(
+            journal=journal,
+            platform=self.platform,
+            created_by=self.system,
+        )
+
+        with self.assertRaises(ValidationError):
+            LinkCheckLog.objects.create(
+                platform=other_platform,
+                journal_platform=link,
+                url="https://invalid.example.org",
+                created_by=self.system,
+            )
+
+    def test_journal_urls_are_read_only(self):
+        field = serializers.JournalPlatformRelationSerializer().fields
+        self.assertTrue(field["public_url"].read_only)
+        self.assertTrue(field["journal_url"].read_only)

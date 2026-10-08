@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 from drf_spectacular.utils import (
     extend_schema,
@@ -18,7 +19,49 @@ from apps.core.viewsets import (
 
 from . import filters, models, serializers
 from apps.platforms.classification import recalculate_platforms
+from apps.platforms import models as platform_models
+from apps.platforms import services as platform_services
 from .classification import related_platform_ids
+
+
+def _with_platform_urls(queryset, *, published_only=False):
+    platform_links = (
+        models.SharedJournalPlatform.objects
+        .filter(platform__deleted_at__isnull=True)
+        .select_related("platform")
+        .prefetch_related(
+            Prefetch(
+                "platform__link_check_logs",
+                queryset=(
+                    platform_models.LinkCheckLog.objects
+                    .filter(journal_platform__isnull=True)
+                    .order_by(*platform_services.LINK_LOG_ORDERING)
+                ),
+                to_attr="_public_link_logs",
+            ),
+            Prefetch(
+                "link_check_logs",
+                queryset=(
+                    platform_models.LinkCheckLog.objects
+                    .order_by(*platform_services.LINK_LOG_ORDERING)
+                ),
+                to_attr="_journal_link_logs",
+            ),
+        )
+        .order_by("platform__name")
+    )
+    if published_only:
+        platform_links = platform_links.filter(
+            platform__status=platform_models.Platform.Status.PUBLICADO
+        )
+
+    return queryset.prefetch_related(
+        Prefetch(
+            "platform_links",
+            queryset=platform_links,
+            to_attr="_url_platform_links",
+        )
+    )
 
 
 @extend_schema_view(
@@ -111,7 +154,7 @@ class JournalViewSet(AuditableViewSet):
     de revistas académicas.
     """
 
-    queryset = models.Journal.objects.all()
+    queryset = _with_platform_urls(models.Journal.objects.all())
 
     serializer_class = serializers.JournalSerializer
 
@@ -334,7 +377,7 @@ class JournalPublicViewSet(
     Exploración pública de revistas activas y validadas.
     """
 
-    queryset = (
+    queryset = _with_platform_urls((
         models.Journal.objects
         .filter(
             active=True,
@@ -344,7 +387,7 @@ class JournalPublicViewSet(
             "editorial"
         )
         .distinct()
-    )
+    ), published_only=True)
 
     serializer_class = (
         serializers.JournalPublicSerializer
