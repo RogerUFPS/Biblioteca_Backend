@@ -123,12 +123,12 @@ En un `PATCH`:
 
 ### 4.3. URL pública de la plataforma
 
-La implementación actual **no almacena la URL pública en `Platform`**. Se registra y conserva en el historial `LinkCheckLog.url`.
+La implementación actual **no almacena la URL pública en `Platform`**. Se registra y conserva en el historial `LinkCheckLog.url`. Las respuestas administrativas y públicas exponen el campo calculado y de solo lectura `public_url`.
 
 ```text
 Platform
     ↓
-LinkCheckLog.url   ← URL pública
+LinkCheckLog.url   ← URL pública (`journal_platform IS NULL`)
 
 Platform.base_api_url ← API de cosecha
 ```
@@ -140,6 +140,8 @@ POST /api/platforms/{id}/check-link/
 ```
 
 Una plataforma necesita al menos una URL pública registrada en `LinkCheckLog` antes de poder publicarse.
+
+Si existe historial, `public_url` se obtiene del último registro no eliminado, ordenado por `last_check`, `created_at` e identificador. Los logs ligados a una revista mediante `journal_platform` no se consideran para este campo. `public_url` nunca se toma de `base_api_url`: esta última continúa siendo exclusivamente la URL técnica de harvesting.
 
 ### 4.4. Campos de `ValidSintaxis`
 
@@ -205,7 +207,7 @@ Cuando una plataforma eliminada se restaura, vuelve a `BORRADOR` y se limpian `v
 
 ### 5.3. Historial de verificación
 
-`LinkCheckLog` es de solo lectura para el cliente.
+`LinkCheckLog` es de solo lectura para el cliente. `journal_platform = null` identifica la URL general de la plataforma; un valor no nulo identifica la URL de una revista dentro de esa plataforma. En el segundo caso, la plataforma de ambos FKs debe coincidir.
 
 | Método | Ruta | Uso |
 | --- | --- | --- |

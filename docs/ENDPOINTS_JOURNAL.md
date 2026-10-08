@@ -162,6 +162,13 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 ]
 ```
 
+En las respuestas, cada relación incluye además dos campos de solo lectura:
+
+- `public_url`: URL general navegable de la plataforma, tomada del último `LinkCheckLog` no eliminado cuyo `journal_platform` es nulo.
+- `journal_url`: URL de esa revista dentro de esa plataforma, tomada del último `LinkCheckLog` no eliminado asociado al `SharedJournalPlatform` correspondiente.
+
+Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de estos valores se obtiene de `base_api_url`, que está reservado para harvesting, ni se persiste en `Journal`, `Platform` o `SharedJournalPlatform`.
+
 Regla obligatoria:
 
 ```text
