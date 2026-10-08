@@ -278,6 +278,7 @@ class PlatformViewSet(AuditableViewSet):
 
     filterset_fields = [
         "status",
+        "is_harvestable",
         "requires_registration",
         "has_access_text",
         "valid_sintaxis",

@@ -243,10 +243,12 @@ class PlatformSerializer(
         ),
     )
 
-    public_url = serializers.SerializerMethodField(
+    public_url = serializers.URLField(
+        required=False,
+        allow_null=True,
         help_text=(
-            "URL pública navegable obtenida del último LinkCheckLog "
-            "general no eliminado. No corresponde a base_api_url."
+            "URL pública navegable. Se almacena como un nuevo "
+            "LinkCheckLog general y no corresponde a base_api_url."
         )
     )
 
@@ -317,6 +319,7 @@ class PlatformSerializer(
             "name",
             "status",
             "base_api_url",
+            "is_harvestable",
             "public_url",
             "api_key",
             "url_image",
@@ -341,13 +344,11 @@ class PlatformSerializer(
             "validated_at",
             "knowledge_areas",
             "academic_programs",
-            "public_url",
         ]
 
-    @extend_schema_field(serializers.URLField(allow_null=True))
-    def get_public_url(self, obj):
-        latest_log = services.latest_platform_link_log(obj)
-        return latest_log.url if latest_log else None
+    def validate_public_url(self, value):
+        services.validate_safe_http_url(value, field_name="public_url")
+        return value
 
     def validate_base_api_url(self, value):
         """Normaliza una URL base vacía a ``None``."""
@@ -394,15 +395,49 @@ class PlatformSerializer(
         else:
             has_api_key = False
 
-        if has_api_key and not effective_base_api_url:
+        effective_is_harvestable = attrs.get(
+            "is_harvestable",
+            instance.is_harvestable if instance is not None else False,
+        )
+        disabling_harvesting = (
+            instance is not None
+            and instance.is_harvestable
+            and attrs.get("is_harvestable") is False
+        )
+
+        if effective_is_harvestable and not effective_base_api_url:
             raise serializers.ValidationError(
                 {
                     "base_api_url": (
-                        "No se puede configurar una API Key sin una URL base "
+                        "Una plataforma cosechable debe tener una URL base "
                         "de la API (base_api_url)."
                     )
                 }
             )
+
+        if has_api_key and not effective_base_api_url:
+            raise serializers.ValidationError({
+                "base_api_url": (
+                    "No se puede configurar una API Key sin una URL base "
+                    "de la API (base_api_url)."
+                )
+            })
+
+        if not effective_is_harvestable:
+            explicitly_sent_base = bool(attrs.get("base_api_url"))
+            explicitly_sent_key = "api_key" in attrs and bool(attrs["api_key"])
+            inherited_configuration = (
+                bool(effective_base_api_url) or has_api_key
+            )
+            if explicitly_sent_base or explicitly_sent_key or (
+                inherited_configuration and not disabling_harvesting
+            ):
+                raise serializers.ValidationError({
+                    "is_harvestable": (
+                        "Una plataforma no cosechable no puede tener "
+                        "base_api_url ni api_key."
+                    )
+                })
 
         return attrs
 
@@ -421,13 +456,17 @@ class PlatformSerializer(
             instance
         )
 
-        return self._represent_relations(
+        representation = self._represent_relations(
             instance=instance,
             representation=representation,
         )
+        latest_log = services.latest_platform_link_log(instance)
+        representation["public_url"] = latest_log.url if latest_log else None
+        return representation
 
     @transaction.atomic
     def create(self, validated_data):
+        public_url = validated_data.pop("public_url", None)
         raw_api_key = validated_data.pop(
             "api_key",
             None,
@@ -483,6 +522,13 @@ class PlatformSerializer(
                 relation_data=relation_data,
             )
 
+        if public_url is not None:
+            services.register_link_url(
+                platform=platform,
+                url=public_url,
+                user=platform.created_by,
+            )
+
         return platform
 
     @transaction.atomic
@@ -491,12 +537,19 @@ class PlatformSerializer(
         instance,
         validated_data,
     ):
-        api_key_was_sent = "api_key" in validated_data
+        public_url_was_sent = "public_url" in validated_data
+        public_url = validated_data.pop("public_url", None)
+        disabling_harvesting = validated_data.get("is_harvestable") is False
+        api_key_was_sent = "api_key" in validated_data or disabling_harvesting
 
         raw_api_key = validated_data.pop(
             "api_key",
             None,
         )
+
+        if disabling_harvesting:
+            validated_data["base_api_url"] = None
+            raw_api_key = None
 
         relation_data = self._prepare_relation_data(
             validated_data
@@ -522,6 +575,13 @@ class PlatformSerializer(
             self._sync_relations(
                 parent=platform,
                 relation_data=relation_data,
+            )
+
+        if public_url_was_sent and public_url is not None:
+            services.register_link_url(
+                platform=platform,
+                url=public_url,
+                user=platform.updated_by or platform.created_by,
             )
 
         return platform
@@ -638,6 +698,7 @@ class PlatformPublicSerializer(
             "id",
             "name",
             "base_api_url",
+            "is_harvestable",
             "public_url",
             "url_image",
             "start_period",

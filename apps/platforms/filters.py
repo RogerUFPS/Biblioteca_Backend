@@ -13,6 +13,7 @@ class PlatformPublicFilter(django_filters.FilterSet):
 
     requires_registration = django_filters.BooleanFilter()
     has_access_text = django_filters.BooleanFilter()
+    is_harvestable = django_filters.BooleanFilter()
 
     class Meta:
         model = models.Platform
@@ -25,6 +26,7 @@ class PlatformPublicFilter(django_filters.FilterSet):
             "academic_program",
             "requires_registration",
             "has_access_text",
+            "is_harvestable",
         ]
 
     def filter_institution(self, queryset, name, value):

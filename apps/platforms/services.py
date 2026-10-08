@@ -17,6 +17,11 @@ LINK_CHECK_TIMEOUT_SECONDS = 10.0
 # aunque requiera autenticación o restrinja el acceso.
 LINK_ACTIVE_AUTH_STATUSES = {401, 403}
 LINK_LOG_ORDERING = ("-last_check", "-created_at", "-pk")
+BLOCKED_METADATA_HOSTS = {
+    "instance-data.ec2.internal",
+    "metadata.azure.internal",
+    "metadata.google.internal",
+}
 
 
 def latest_platform_link_log(platform):
@@ -45,6 +50,69 @@ def latest_journal_link_log(journal_platform):
         .order_by(*LINK_LOG_ORDERING)
         .first()
     )
+
+
+def register_link_url(
+    *,
+    platform: models.Platform,
+    url: str,
+    user,
+    journal_platform=None,
+) -> models.LinkCheckLog:
+    """
+    Registra una URL nueva sin sobrescribir el historial.
+
+    Si la URL coincide con la vigente para el mismo contexto, reutiliza
+    el log actual y evita crear un registro redundante.
+    """
+    validate_safe_http_url(url)
+
+    if journal_platform is None:
+        latest_log = (
+            models.LinkCheckLog.objects
+            .filter(platform=platform, journal_platform__isnull=True)
+            .order_by(*LINK_LOG_ORDERING)
+            .first()
+        )
+    else:
+        if journal_platform.deleted_at is not None:
+            raise ValidationError({
+                "journal_url": (
+                    "No se puede registrar una URL para una relación "
+                    "revista-plataforma archivada."
+                )
+            })
+        if journal_platform.platform_id != platform.pk:
+            raise ValidationError({
+                "journal_platform": (
+                    "La relación revista-plataforma debe pertenecer a la "
+                    "misma plataforma del enlace."
+                )
+            })
+        latest_log = (
+            models.LinkCheckLog.objects
+            .filter(journal_platform=journal_platform)
+            .order_by(*LINK_LOG_ORDERING)
+            .first()
+        )
+
+    if latest_log is not None and latest_log.url == url:
+        return latest_log
+
+    link_log = models.LinkCheckLog.objects.create(
+        platform=platform,
+        journal_platform=journal_platform,
+        url=url,
+        created_by=user,
+    )
+    if hasattr(platform, "_public_link_logs"):
+        delattr(platform, "_public_link_logs")
+    if (
+        journal_platform is not None
+        and hasattr(journal_platform, "_journal_link_logs")
+    ):
+        delattr(journal_platform, "_journal_link_logs")
+    return link_log
 
 
 REQUIRED_PLATFORM_RELATIONS = (
@@ -117,6 +185,19 @@ def validate_platform_for_publication(
                 "La plataforma debe tener una URL de API "
                 "si tiene una API Key configurada."
             )
+
+    if platform.is_harvestable and not platform.base_api_url:
+        errors["base_api_url"] = (
+            "Una plataforma cosechable debe tener una URL base de API."
+        )
+
+    if not platform.is_harvestable and (
+        platform.base_api_url or platform.encrypted_api_key
+    ):
+        errors["is_harvestable"] = (
+            "Una plataforma no cosechable no puede conservar "
+            "configuración técnica de cosecha."
+        )
 
     # Si no tiene API Key, base_api_url es completamente opcional.
 
@@ -282,7 +363,7 @@ def _is_public_ip_address(
     )
 
 
-def _validate_safe_http_url(
+def validate_safe_http_url(
     url: str,
     *,
     field_name: str = "url",
@@ -333,6 +414,7 @@ def _validate_safe_http_url(
         hostname == "localhost"
         or hostname.endswith(".localhost")
         or hostname.endswith(".local")
+        or hostname in BLOCKED_METADATA_HOSTS
     ):
         raise ValidationError({
             field_name: (
@@ -384,6 +466,10 @@ def _validate_safe_http_url(
                     "privada, local o reservada."
                 )
             })
+
+
+# Compatibilidad interna con el checker y sus pruebas existentes.
+_validate_safe_http_url = validate_safe_http_url
 
 
 def _get_next_fail_count(
