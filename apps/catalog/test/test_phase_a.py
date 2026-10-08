@@ -227,7 +227,7 @@ class PhaseATests(TestCase):
         response = self.client.get("/api/catalog/editorials/archived/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["total_items"], 1)
         self.assertEqual(response.data["results"][0]["id"], archived.pk)
         self.assertIsNotNone(response.data["results"][0]["deleted_at"])
 

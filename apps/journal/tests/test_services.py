@@ -68,6 +68,7 @@ class JournalServicesTests(TestCase):
 
         cls.platform = Platform.objects.create(
             name="Scopus Test",
+            is_harvestable=True,
             base_api_url="https://api.scopus.test",
             status=Platform.Status.PUBLICADO,
             created_by=cls.system,
@@ -319,6 +320,10 @@ class JournalServicesTests(TestCase):
 
         self.assertIsNone(
             restored.validated_at
+        )
+
+        self.assertFalse(
+            restored.active
         )
 
     # ==========================================================================
@@ -761,4 +766,8 @@ class JournalServicesTests(TestCase):
                 user=self.system,
             )
 
+<<<<<<< HEAD
         self.assertIn("platform_id", context.exception.detail)
+=======
+        self.assertIn("platform_id", context.exception.detail)
+>>>>>>> production

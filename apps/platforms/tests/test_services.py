@@ -69,6 +69,7 @@ class PlatformServicesTests(TestCase):
     def _setup_complete_platform(self):
         platform = models.Platform.objects.create(
             name="Plataforma Completa",
+            is_harvestable=True,
             base_api_url="https://api.completa.org",
             start_period="2000-01-01",
             valid_sintaxis=self.sintaxis,
@@ -128,6 +129,7 @@ class PlatformServicesTests(TestCase):
     def test_publish_platform_succeeds_when_complete(self):
         """Verifica que una plataforma con toda la ficha valida pase a PUBLICADO."""
         platform = self._setup_complete_platform()
+<<<<<<< HEAD
 
         published = services.publish_platform(
             platform=platform,
@@ -147,6 +149,50 @@ class PlatformServicesTests(TestCase):
         self.assertIsNotNone(
             published.validated_at,
         )
+=======
+
+        published = services.publish_platform(
+            platform=platform,
+            user=self.system,
+        )
+
+        self.assertEqual(
+            published.status,
+            models.Platform.Status.PUBLICADO,
+        )
+
+        self.assertEqual(
+            published.validated_by,
+            self.system,
+        )
+
+        self.assertIsNotNone(
+            published.validated_at,
+        )
+
+    def test_non_harvestable_platform_can_be_published_without_api_url(self):
+        platform = self._setup_complete_platform()
+        platform.is_harvestable = False
+        platform.base_api_url = None
+        platform.save(update_fields=["is_harvestable", "base_api_url"])
+
+        published = services.publish_platform(
+            platform=platform,
+            user=self.system,
+        )
+
+        self.assertEqual(published.status, models.Platform.Status.PUBLICADO)
+
+    def test_harvestable_platform_cannot_be_published_without_api_url(self):
+        platform = self._setup_complete_platform()
+        platform.base_api_url = None
+        platform.save(update_fields=["base_api_url"])
+
+        with self.assertRaises(ValidationError) as context:
+            services.publish_platform(platform=platform, user=self.system)
+
+        self.assertIn("base_api_url", context.exception.detail)
+>>>>>>> production
 
     def test_publish_platform_fails_when_incomplete(self):
         """Verifica que la publicacion falle si faltan relaciones o campos obligatorios."""
@@ -248,6 +294,14 @@ class PlatformServicesTests(TestCase):
             services._validate_safe_http_url(
                 "http://192.168.1.1/api"
             )
+<<<<<<< HEAD
+=======
+
+        with self.assertRaises(ValidationError):
+            services.validate_safe_http_url(
+                "http://metadata.google.internal/computeMetadata/v1/"
+            )
+>>>>>>> production
 
     @patch("apps.platforms.services._perform_link_check")
     @patch("apps.platforms.services._validate_safe_http_url")
@@ -312,4 +366,8 @@ class PlatformServicesTests(TestCase):
 
         self.assertTrue(
             log3.is_active,
+<<<<<<< HEAD
         )
+=======
+        )
+>>>>>>> production

@@ -75,6 +75,7 @@ class PlatformAPITests(APITestCase):
     ):
         platform = models.Platform.objects.create(
             name=name,
+            is_harvestable=True,
             base_api_url="https://api.test.org",
             start_period="2000-01-01",
             valid_sintaxis=self.sintaxis,
@@ -136,6 +137,8 @@ class PlatformAPITests(APITestCase):
             "/api/platforms/",
             {
                 "name": "Scopus API Test",
+                "public_url": "https://8.8.8.8/scopus",
+                "is_harvestable": True,
                 "base_api_url": "https://api.scopus.com",
                 "api_key": "raw_secret_key",
                 "start_period": "2010-01-01",
@@ -161,6 +164,21 @@ class PlatformAPITests(APITestCase):
             "encrypted_api_key",
             data,
         )
+<<<<<<< HEAD
+=======
+        self.assertNotIn("api_key", data)
+        self.assertEqual(data["public_url"], "https://8.8.8.8/scopus")
+        self.assertTrue(data["is_harvestable"])
+        platform = models.Platform.objects.get(pk=data["id"])
+        self.assertFalse(hasattr(platform, "public_url"))
+        self.assertTrue(
+            models.LinkCheckLog.objects.filter(
+                platform=platform,
+                journal_platform__isnull=True,
+                url="https://8.8.8.8/scopus",
+            ).exists()
+        )
+>>>>>>> production
 
     def test_publish_action_endpoint(self):
         """Verifica la accion POST /api/platforms/{id}/publish/."""
@@ -306,4 +324,8 @@ class PlatformAPITests(APITestCase):
         self.assertEqual(
             len(data_empty["results"]),
             0,
+<<<<<<< HEAD
         )
+=======
+        )
+>>>>>>> production

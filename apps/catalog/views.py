@@ -1,4 +1,4 @@
-from apps.core.viewsets import AuditableViewSet
+from apps.core.viewsets import AuditableViewSet, get_acting_user
 
 from . import models, serializers
 from rest_framework.decorators import action
@@ -46,6 +46,32 @@ class KnowledgeAreaViewSet(AuditableViewSet):
     search_fields = ["name"]
     ordering_fields = ["name", "created_at"]
 
+    def destroy(self, request, *args, **kwargs):
+        area = self.get_object()
+        program_ids = set(
+            models.SharedAcademicProgramKnowledgeArea.objects.filter(
+                knowledge_area=area,
+            ).values_list("academic_program_id", flat=True)
+        )
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code < 400 and program_ids:
+            from apps.journal.classification import propagate_catalog_change
+            propagate_catalog_change(program_ids, user=get_acting_user(request))
+        return response
+
+    @action(detail=True, methods=["post"], url_path="restore")
+    def restore(self, request, pk=None):
+        response = super().restore(request, pk=pk)
+        if response.status_code < 400:
+            program_ids = set(
+                models.SharedAcademicProgramKnowledgeArea.objects.filter(
+                    knowledge_area_id=pk,
+                ).values_list("academic_program_id", flat=True)
+            )
+            from apps.journal.classification import propagate_catalog_change
+            propagate_catalog_change(program_ids, user=get_acting_user(request))
+        return response
+
     @action(detail=True, methods=["get"], url_path="academic-programs")
     def academic_programs(self, request, pk=None):
         area = self.get_object()
@@ -68,6 +94,23 @@ class AcademicProgramViewSet(AuditableViewSet):
     serializer_class = serializers.AcademicProgramSerializer
     search_fields = ["name"]
     ordering_fields = ["name", "created_at"]
+
+    def destroy(self, request, *args, **kwargs):
+        program = self.get_object()
+        program_id = program.pk
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code < 400:
+            from apps.journal.classification import propagate_catalog_change
+            propagate_catalog_change([program_id], user=get_acting_user(request))
+        return response
+
+    @action(detail=True, methods=["post"], url_path="restore")
+    def restore(self, request, pk=None):
+        response = super().restore(request, pk=pk)
+        if response.status_code < 400:
+            from apps.journal.classification import propagate_catalog_change
+            propagate_catalog_change([int(pk)], user=get_acting_user(request))
+        return response
 
     @action(detail=True, methods=["get"], url_path="knowledge-areas")
     def knowledge_areas(self, request, pk=None):

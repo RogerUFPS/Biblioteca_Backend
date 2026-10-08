@@ -2,8 +2,13 @@ from django.contrib import admin
 
 from . import models
 
+
+@admin.register(models.Platform)
+class PlatformAdmin(admin.ModelAdmin):
+    exclude = ("encrypted_api_key",)
+
+
 for model in [
-    models.Platform,
     models.ValidSintaxis,
     models.LinkCheckLog,
     models.SharedPlatformSupport,
