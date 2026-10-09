@@ -122,7 +122,7 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
     def pause(self, request, pk=None):
         with transaction.atomic():
             harvest = get_object_or_404(
-                self.get_queryset().select_for_update(),
+                self.get_queryset().select_for_update(of=("self",)),
                 pk=pk,
             )
             if harvest.state == models.Harvest.State.PENDING:
@@ -156,7 +156,7 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
     def resume(self, request, pk=None):
         with transaction.atomic():
             harvest = get_object_or_404(
-                self.get_queryset().select_for_update(),
+                self.get_queryset().select_for_update(of=("self",)),
                 pk=pk,
             )
             if harvest.state != models.Harvest.State.PAUSED:
