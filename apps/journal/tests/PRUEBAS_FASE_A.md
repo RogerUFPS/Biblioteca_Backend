@@ -45,9 +45,9 @@ Estas pruebas documentan y validan el comportamiento integral del módulo `journ
 | `test_platform_relation_rejects_invalid_period` | Rechaza una relación con plataforma cuando el período final es anterior al período inicial. |
 | `test_archived_platform_relation_is_restored_and_updated` | Restaura y actualiza correctamente una relación `Journal - Platform` previamente eliminada. |
 | `test_duplicate_platforms_are_rejected` | Rechaza plataformas duplicadas dentro del mismo payload. |
-| `test_platform_relation_rejects_draft_platform` | Rechaza la asociación de una revista con una plataforma en estado `BORRADOR`. |
-| `test_platform_relation_rejects_obsolete_platform` | Rechaza la asociación de una revista con una plataforma en estado `OBSOLETO`. |
-| `test_platform_relation_allows_published_platform` | Permite asociar una revista únicamente con una plataforma en estado `PUBLICADO`. |
+| `test_platform_relation_allows_draft_platform` | Permite asociar una revista con una plataforma en estado `BORRADOR` sin publicarla. |
+| `test_platform_relation_allows_obsolete_platform` | Permite asociar una revista con una plataforma no eliminada en estado `OBSOLETO`. |
+| `test_platform_relation_allows_published_platform` | Permite asociar una revista con una plataforma en estado `PUBLICADO`. |
 | `test_archived_journal_restored_via_serializer` | Una revista eliminada que se recrea con el mismo ISSN es restaurada en lugar de generar un registro duplicado. |
 | `test_partial_update_without_relations_keeps_existing_relations` | Una actualización parcial que no incluye relaciones conserva las relaciones existentes. |
 | `test_public_serializer_excludes_audit_fields_and_includes_public_platform` | `JournalPublicSerializer` no expone campos internos de auditoría y representa las plataformas publicadas con sus atributos de relación. |
@@ -79,8 +79,9 @@ Estas pruebas documentan y validan el comportamiento integral del módulo `journ
 | `test_source_platform_restores_archived_relation` | Restaura una relación `Journal - Platform` previamente eliminada mediante Soft Delete. |
 | `test_source_platform_rejects_invalid_period` | Rechaza un período inválido en la relación con la plataforma. |
 | `test_source_platform_rejects_invalid_platform` | Rechaza una plataforma inexistente. |
-| `test_source_platform_rejects_draft_platform` | El servicio rechaza una plataforma en estado `BORRADOR` como plataforma de procedencia. |
-| `test_source_platform_rejects_obsolete_platform` | El servicio rechaza una plataforma en estado `OBSOLETO` como plataforma de procedencia. |
+| `test_source_platform_allows_draft_platform` | El servicio admite una plataforma en estado `BORRADOR` como plataforma de procedencia. |
+| `test_source_platform_allows_obsolete_platform` | El servicio admite una plataforma no eliminada en estado `OBSOLETO`. |
+| `test_source_platform_rejects_soft_deleted_platform` | El servicio rechaza una plataforma eliminada lógicamente. |
 
 ---
 
@@ -90,7 +91,7 @@ Estas pruebas documentan y validan el comportamiento integral del módulo `journ
 | --- | --- |
 | `test_create_journal_endpoint` | `POST /api/journals/` crea una revista correctamente mediante la API y retorna HTTP 201. |
 | `test_create_journal_endpoint_derives_knowledge_areas` | La creación por API deriva las áreas del conocimiento desde `academic_programs` e ignora cualquier intento de asignarlas manualmente. |
-| `test_create_journal_endpoint_rejects_draft_platform` | La API rechaza con HTTP 400 la creación de una revista asociada a una plataforma en estado `BORRADOR`. |
+| `test_create_journal_endpoint_allows_draft_platform` | La API permite crear una revista asociada a una plataforma en `BORRADOR` sin alterar su estado. |
 | `test_list_journals_returns_active_journals` | `GET /api/journals/` lista las revistas disponibles en el endpoint administrativo y excluye registros eliminados mediante Soft Delete. |
 | `test_publish_action_endpoint` | `POST /api/journals/{id}/publish/` activa y valida una revista, registrando el usuario y la fecha de validación. |
 | `test_deactivate_action_endpoint` | `POST /api/journals/{id}/deactivate/` desactiva una revista. |

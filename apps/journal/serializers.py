@@ -10,7 +10,6 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
-    SharedAcademicProgramKnowledgeArea,
 )
 from apps.core.serializers import (
     RelationConfig,
@@ -242,13 +241,6 @@ class JournalPlatformRelationSerializer(
             attrs.get("finish_period"),
         )
 
-        platform = attrs.get("platform")
-        if platform:
-            validate_platform_for_journal_association(
-                platform,
-                field_name="platform",
-            )
-
         return attrs
 
 
@@ -416,7 +408,7 @@ class JournalSerializer(
 
     def validate_platforms(self, value):
         """
-        Valida que una plataforma no aparezca más de una vez.
+        Valida duplicados y evita asociar plataformas eliminadas.
         """
         platform_ids = [
             item["platform"].pk

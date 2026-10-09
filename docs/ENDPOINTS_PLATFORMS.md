@@ -107,6 +107,8 @@ delete_explanation
 ### 4.2. `is_harvestable`, `base_api_url` y `api_key`
 
 Son datos de configuración de cosecha y son independientes de la URL pública.
+`is_harvestable` tiene valor predeterminado `false`; solo pasa a `true` cuando
+el cliente lo solicita explícitamente y proporciona una configuración válida.
 
 | `is_harvestable` | `base_api_url` | `api_key` | Resultado |
 | --- | --- | --- | --- |
@@ -232,6 +234,9 @@ No existe `POST`, `PUT`, `PATCH` ni `DELETE` público para fabricar resultados d
 | GET | `/api/platforms/public/{id}/` | Consultar ficha pública |
 
 Las plataformas `BORRADOR`, `OBSOLETO` o eliminadas no aparecen en este endpoint.
+Una Platform puede recibir relaciones administrativas con Journals antes de
+publicarse. Estas relaciones pueden preparar su clasificación derivada, pero no
+alteran su estado ni sustituyen la acción explícita `publish`.
 
 ## 6. Ejemplos con `curl`
 

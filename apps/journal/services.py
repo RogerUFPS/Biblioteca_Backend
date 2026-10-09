@@ -10,7 +10,6 @@ from apps.catalog.models import (
     Editorial,
     Language,
     MaterialType,
-    SharedAcademicProgramKnowledgeArea,
 )
 from apps.platforms.models import Platform
 
@@ -62,18 +61,17 @@ def validate_platform_for_journal_association(
     field_name: str = "platform_id",
 ) -> None:
     """
-    Garantiza que una revista solo pueda asociarse a una plataforma
-    publicada.
+    Garantiza que una revista solo se asocie a una plataforma vigente.
 
     Esta validación se reutiliza tanto en el serializer administrativo
     como en el servicio interno de creación/cosecha.
     """
-    if platform.status != Platform.Status.PUBLICADO:
+    if platform.is_deleted:
         raise ValidationError(
             {
                 field_name: (
-                    "La revista no puede asociarse a una plataforma "
-                    "que no esté publicada."
+                    "La plataforma indicada no existe o se encuentra "
+                    "eliminada."
                 )
             }
         )
@@ -330,11 +328,6 @@ def _sync_source_platform(
                 )
             }
         )
-
-    validate_platform_for_journal_association(
-        platform,
-        field_name="platform_id",
-    )
 
     active_link = (
         models.SharedJournalPlatform.objects
