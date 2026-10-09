@@ -172,13 +172,17 @@ Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de est
 
 Omitir `journal_url` en un `PATCH` conserva el historial. Repetir la URL vigente no crea otro log; una URL diferente genera un nuevo registro. La URL puede pertenecer a un dominio distinto al de `public_url`: se valida seguridad SSRF, no igualdad de hostname.
 
-Regla obligatoria:
+Regla de asociación:
 
 ```text
-Platform = PUBLICADO  → permitir asociación
-Platform = BORRADOR   → HTTP 400
-Platform = OBSOLETO   → HTTP 400
+Platform no eliminada → permitir asociación en BORRADOR, PUBLICADO u OBSOLETO
+Platform eliminada    → HTTP 400
 ```
+
+La asociación es administrativa: no cambia `status`, `validated_by` ni
+`validated_at`. Una Platform en BORRADOR permanece en BORRADOR hasta ejecutar
+explícitamente `POST /api/platforms/{id}/publish/`. En las respuestas públicas
+de Journal solo se muestran relaciones cuya Platform está PUBLICADA.
 
 También se valida que `finish_period` no sea anterior a `start_period`.
 
@@ -558,4 +562,6 @@ eliminada. Al restaurarla siguen sin aportar hasta que sea republicada.
 
 Una Journal aporta a Platform solo cuando ella y el vínculo Journal–Platform
 no están eliminados, `active=true` y `validated_at` no es nulo. Los vínculos
-nuevos o restaurados solo se admiten con Platforms en estado `PUBLICADO`.
+nuevos o restaurados admiten Platforms en cualquier estado, siempre que no
+estén eliminadas. Asociar una Platform no cambia su estado ni sus datos de
+validación.
