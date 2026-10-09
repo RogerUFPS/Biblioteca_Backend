@@ -82,7 +82,6 @@ institutions
 languages
 countries
 material_types
-academic_programs
 ```
 
 Los siguientes campos son de solo lectura o son controlados por el backend:
@@ -93,6 +92,7 @@ status
 validated_by
 validated_at
 knowledge_areas
+academic_programs
 created_by
 created_at
 updated_by
@@ -102,7 +102,9 @@ deleted_at
 delete_explanation
 ```
 
-`knowledge_areas` **no se selecciona manualmente**. El backend la deriva a partir de `academic_programs` usando la relación `SharedAcademicProgramKnowledgeArea`.
+`academic_programs` y `knowledge_areas` **no se seleccionan manualmente**.
+Platform obtiene los programas de sus Journals elegibles y deriva las áreas
+mediante `SharedAcademicProgramKnowledgeArea`.
 
 ### 4.2. `is_harvestable`, `base_api_url` y `api_key`
 
@@ -464,6 +466,7 @@ material_type
 academic_program
 requires_registration
 has_access_text
+is_harvestable
 ```
 
 Ejemplos:
@@ -483,6 +486,7 @@ Filtros:
 
 ```text
 platform
+journal_platform
 is_active
 ```
 
@@ -505,19 +509,20 @@ curl "http://localhost:8000/api/platforms/link-check-logs/?platform=1&is_active=
 La suite de Django utiliza una base de datos de pruebas separada. Para ejecutar las pruebas de `platforms`:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.platforms --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.platforms --keepdb
 ```
 
-Estado validado de la Fase A:
+Inventario actual de la suite:
 
 ```text
-30/30 pruebas OK
+43 pruebas: 6 de modelos, 21 de serializadores, 7 de servicios,
+2 de clasificación y 7 de API.
 ```
 
 Para validar también el esquema OpenAPI:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py spectacular --validate --file /tmp/schema.yml
+docker compose -f docker/docker-compose.yml run --rm web python manage.py spectacular --validate --file /tmp/schema.yml
 ```
 
 Resultado validado:
