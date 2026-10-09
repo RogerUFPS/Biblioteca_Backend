@@ -151,7 +151,10 @@ POST /api/platforms/{id}/check-link/
 
 Una plataforma necesita al menos una URL pública registrada en `LinkCheckLog` antes de poder publicarse.
 
-Si existe historial, `public_url` se obtiene del último registro no eliminado, ordenado por `last_check`, `created_at` e identificador. Los logs ligados a una revista mediante `journal_platform` no se consideran para este campo. `public_url` nunca se toma de `base_api_url`: esta última continúa siendo exclusivamente la URL técnica de harvesting.
+Si existe historial, `public_url` se obtiene del último registro general no
+eliminado. Los logs ligados a una revista mediante `journal_platform` no se
+consideran para este campo. `public_url` nunca se toma de `base_api_url`: esta
+última continúa siendo exclusivamente la URL técnica de harvesting.
 
 En `PATCH`, omitir `public_url` conserva el historial; enviar la misma URL no duplica logs y enviar una URL distinta crea un nuevo registro. Toda URL recibida pasa por la validación SSRF del backend.
 
@@ -221,12 +224,33 @@ Cuando una plataforma eliminada se restaura, vuelve a `BORRADOR` y se limpian `v
 
 `LinkCheckLog` es de solo lectura para el cliente. `journal_platform = null` identifica la URL general de la plataforma; un valor no nulo identifica la URL de una revista dentro de esa plataforma. En el segundo caso, la plataforma de ambos FKs debe coincidir.
 
+El estado visual debe interpretarse con `last_check` e `is_active`:
+
+```text
+last_check = null                         → Sin verificar
+last_check != null e is_active = true    → Disponible
+last_check != null e is_active = false   → Error / No disponible
+```
+
+`http_status_code=null` no basta para determinar el estado: puede representar
+una URL aún no verificada o un chequeo fallido sin respuesta HTTP. Cuando sí se
+realiza un chequeo, `last_check` contiene su fecha real. `created_at` solo indica
+cuándo se creó el registro.
+
+El historial se ordena por defecto con las verificaciones realizadas primero:
+`last_check` descendente con nulos al final, seguido por `created_at` e `id`
+descendentes. El orden se aplica antes de la paginación. Los registros sin
+verificar quedan al final y no se mezclan cronológicamente como si fueran
+errores.
+
 | Método | Ruta | Uso |
 | --- | --- | --- |
 | GET | `/api/platforms/link-check-logs/` | Listar verificaciones |
 | GET | `/api/platforms/link-check-logs/{id}/` | Consultar una verificación |
 
-No existe `POST`, `PUT`, `PATCH` ni `DELETE` público para fabricar resultados de verificación. Los registros se crean mediante `check-link`.
+No existe `POST`, `PUT`, `PATCH` ni `DELETE` público para fabricar resultados
+de verificación. Registrar o cambiar `public_url` crea un registro pendiente;
+`check-link` crea el registro correspondiente a una verificación real.
 
 ### 5.4. Consulta pública
 
@@ -487,6 +511,7 @@ Filtros:
 ```text
 platform
 journal_platform
+journal_platform__isnull
 is_active
 ```
 
@@ -498,10 +523,24 @@ fail_count
 created_at
 ```
 
+Paginación:
+
+```text
+page       → número de página
+page_size  → cantidad de elementos (10 por defecto, máximo 100)
+```
+
 Ejemplo:
 
 ```bash
 curl "http://localhost:8000/api/platforms/link-check-logs/?platform=1&is_active=false"
+```
+
+Para consultar únicamente el historial de la URL pública general, sin mezclar
+URLs contextuales de Journals:
+
+```bash
+curl "http://localhost:8000/api/platforms/link-check-logs/?platform=1&journal_platform__isnull=true"
 ```
 
 ## 9. Probar sin modificar la base de datos normal
@@ -515,8 +554,8 @@ docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web 
 Inventario actual de la suite:
 
 ```text
-43 pruebas: 6 de modelos, 21 de serializadores, 7 de servicios,
-2 de clasificación y 7 de API.
+47 pruebas: 6 de modelos, 21 de serializadores, 7 de servicios,
+2 de clasificación y 11 de API.
 ```
 
 Para validar también el esquema OpenAPI:

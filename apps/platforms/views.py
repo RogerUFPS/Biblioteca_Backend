@@ -1,7 +1,9 @@
-from django.db.models import Prefetch
+from django.db.models import F, Prefetch
 from django.utils import timezone
 
 from drf_spectacular.utils import (
+    OpenApiParameter,
+    OpenApiTypes,
     extend_schema,
     extend_schema_view,
     inline_serializer,
@@ -16,6 +18,7 @@ from apps.core.viewsets import (
     AuditableViewSet,
     get_acting_user,
 )
+from apps.core.pagination import CustomPageNumberPagination
 
 from . import filters, models, serializers, services
 
@@ -145,8 +148,23 @@ class ValidSintaxisViewSet(AuditableViewSet):
         summary="Listar verificaciones de enlaces",
         description=(
             "Obtiene el historial de verificaciones realizadas sobre "
-            "los enlaces de las plataformas."
+            "los enlaces de las plataformas. Por defecto muestra primero "
+            "las verificaciones más recientes y deja al final los registros "
+            "todavía no verificados. Use journal_platform__isnull=true para "
+            "consultar únicamente URLs públicas generales."
         ),
+        parameters=[
+            OpenApiParameter(
+                name="page_size",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Cantidad de registros por página. Valor predeterminado: "
+                    "10; máximo permitido: 100."
+                ),
+            ),
+        ],
         tags=["Plataformas - Verificación de enlaces"],
     ),
     retrieve=extend_schema(
@@ -162,14 +180,19 @@ class LinkCheckLogViewSet(viewsets.ReadOnlyModelViewSet):
     Consulta de solo lectura del historial de verificaciones de enlaces.
     """
 
-    queryset = models.LinkCheckLog.objects.all()
+    queryset = models.LinkCheckLog.objects.order_by(
+        F("last_check").desc(nulls_last=True),
+        "-created_at",
+        "-pk",
+    )
     serializer_class = serializers.LinkCheckLogSerializer
+    pagination_class = CustomPageNumberPagination
 
-    filterset_fields = [
-        "platform",
-        "journal_platform",
-        "is_active",
-    ]
+    filterset_fields = {
+        "platform": ["exact"],
+        "journal_platform": ["exact", "isnull"],
+        "is_active": ["exact"],
+    }
 
     ordering_fields = [
         "last_check",
