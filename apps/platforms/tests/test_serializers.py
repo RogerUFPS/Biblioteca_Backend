@@ -288,6 +288,9 @@ class PlatformSerializersTests(TestCase):
             platform.base_api_url,
         )
 
+        self.assertFalse(platform.is_harvestable)
+        self.assertFalse(serializer.data["is_harvestable"])
+
         self.assertIsNone(
             platform.encrypted_api_key,
         )
