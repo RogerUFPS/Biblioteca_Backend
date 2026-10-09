@@ -9,3 +9,4 @@ python-dotenv
 django-cors-headers
 cryptography>=42.0
 httpx>=0.27
+django-auditlog>=3.0.0
