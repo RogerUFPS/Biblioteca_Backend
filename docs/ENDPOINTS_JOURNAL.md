@@ -30,7 +30,9 @@ La API quedará disponible en:
 http://localhost:8000
 ```
 
-Para asociar una revista a una plataforma, la plataforma debe existir y encontrarse en estado `PUBLICADO`.
+Para asociar una revista a una plataforma, la plataforma debe existir y no
+estar eliminada lógicamente. Puede encontrarse en `BORRADOR`, `PUBLICADO` u
+`OBSOLETO`; la asociación no modifica su estado ni la publica.
 
 ## 3. Swagger y esquema OpenAPI
 
@@ -172,13 +174,17 @@ Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de est
 
 Omitir `journal_url` en un `PATCH` conserva el historial. Repetir la URL vigente no crea otro log; una URL diferente genera un nuevo registro. La URL puede pertenecer a un dominio distinto al de `public_url`: se valida seguridad SSRF, no igualdad de hostname.
 
-Regla obligatoria:
+Regla de asociación:
 
 ```text
-Platform = PUBLICADO  → permitir asociación
-Platform = BORRADOR   → HTTP 400
-Platform = OBSOLETO   → HTTP 400
+Platform no eliminada → permitir asociación en BORRADOR, PUBLICADO u OBSOLETO
+Platform eliminada    → HTTP 400
 ```
+
+La asociación es administrativa: no cambia `status`, `validated_by` ni
+`validated_at`. Una Platform en BORRADOR permanece en BORRADOR hasta ejecutar
+explícitamente `POST /api/platforms/{id}/publish/`. En las respuestas públicas
+de Journal solo se muestran relaciones cuya Platform está PUBLICADA.
 
 También se valida que `finish_period` no sea anterior a `start_period`.
 
@@ -206,7 +212,8 @@ has_full_text
 
 `create_journal()` **no recibe `knowledge_area_ids`**. Las áreas se derivan exclusivamente desde `academic_program_ids`.
 
-Si recibe `platform_id`, esa plataforma también debe estar `PUBLICADO`.
+Si recibe `platform_id`, la plataforma debe existir y no estar eliminada
+lógicamente. No se exige que esté `PUBLICADO`.
 
 ## 5. Operaciones generales
 
@@ -270,7 +277,7 @@ El ISSN se almacena normalizado como `1476-4687`.
 
 La respuesta incluye las `knowledge_areas` derivadas automáticamente de `academic_programs`.
 
-### 6.2. Crear una revista asociada a una plataforma publicada
+### 6.2. Crear una revista asociada a una plataforma
 
 ```bash
 curl -X POST http://localhost:8000/api/journals/ \
@@ -290,9 +297,9 @@ curl -X POST http://localhost:8000/api/journals/ \
   }'
 ```
 
-La plataforma con ID `1` debe estar en estado `PUBLICADO`.
-
-Si está en `BORRADOR` u `OBSOLETO`, la petición responde `400` con el mensaje correspondiente.
+La plataforma con ID `1` puede estar en `BORRADOR`, `PUBLICADO` u `OBSOLETO`,
+siempre que no esté eliminada lógicamente. La operación no cambia `status`,
+`validated_by` ni `validated_at` de la Platform.
 
 ### 6.3. Cambiar programas académicos
 
@@ -479,28 +486,29 @@ También admite `search` por título/ISSN y ordenamiento por `title`, `issn`, `s
 La suite de Django utiliza una base de datos de pruebas separada. Para ejecutar las pruebas de `journal`:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.journal --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.journal --keepdb
 ```
 
-Estado validado de la Fase A:
+Inventario actual de la suite:
 
 ```text
-74/74 pruebas OK
+85 pruebas
 ```
 
 Distribución actual:
 
 ```text
-Modelos:         11
-Serializadores:  21
-Servicios:       23
-API:             19
+Modelos:          11
+Serializadores:   28
+Clasificación:     3
+Servicios:        24
+API:              19
 ```
 
 Para validar también el esquema OpenAPI:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py spectacular --validate --file /tmp/schema.yml
+docker compose -f docker/docker-compose.yml run --rm web python manage.py spectacular --validate --file /tmp/schema.yml
 ```
 
 Resultado validado:
@@ -514,7 +522,7 @@ Errors:   0
 
 | Código | Causa típica |
 | --- | --- |
-| 400 | ISSN inválido, período incoherente, relación duplicada, plataforma no publicada o identificador de catálogo inválido |
+| 400 | ISSN inválido, período incoherente, relación duplicada, plataforma eliminada, URL insegura o identificador de catálogo inválido |
 | 404 | ID inexistente o revista eliminada |
 | 405 | Método HTTP no permitido, por ejemplo intentar escribir sobre `/public/` |
 | 500 al iniciar | Dependencias, `.env` o migraciones pendientes |
@@ -558,4 +566,6 @@ eliminada. Al restaurarla siguen sin aportar hasta que sea republicada.
 
 Una Journal aporta a Platform solo cuando ella y el vínculo Journal–Platform
 no están eliminados, `active=true` y `validated_at` no es nulo. Los vínculos
-nuevos o restaurados solo se admiten con Platforms en estado `PUBLICADO`.
+nuevos o restaurados admiten Platforms en cualquier estado, siempre que no
+estén eliminadas. Asociar una Platform no cambia su estado ni sus datos de
+validación.

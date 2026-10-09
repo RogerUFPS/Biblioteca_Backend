@@ -177,6 +177,34 @@ class PlatformAPITests(APITestCase):
             ).exists()
         )
 
+    def test_create_platform_defaults_to_not_harvestable(self):
+        response = self.client.post(
+            "/api/platforms/",
+            {"name": "Referencia por defecto"},
+            format="json",
+        )
+        data = self._get_data(response)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(data["is_harvestable"])
+        self.assertFalse(
+            models.Platform.objects.get(pk=data["id"]).is_harvestable
+        )
+
+    def test_create_platform_accepts_explicit_not_harvestable(self):
+        response = self.client.post(
+            "/api/platforms/",
+            {
+                "name": "Referencia explícita",
+                "is_harvestable": False,
+            },
+            format="json",
+        )
+        data = self._get_data(response)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(data["is_harvestable"])
+
     def test_publish_action_endpoint(self):
         """Verifica la accion POST /api/platforms/{id}/publish/."""
         platform = self._setup_complete_platform()

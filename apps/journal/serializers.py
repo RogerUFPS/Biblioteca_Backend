@@ -416,7 +416,7 @@ class JournalSerializer(
 
     def validate_platforms(self, value):
         """
-        Valida que una plataforma no aparezca más de una vez.
+        Valida duplicados y evita asociar plataformas eliminadas.
         """
         platform_ids = [
             item["platform"].pk

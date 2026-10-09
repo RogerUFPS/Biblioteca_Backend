@@ -174,7 +174,7 @@ class JournalAPITests(APITestCase):
             [self.knowledge_area.pk],
         )
 
-    def test_create_journal_endpoint_rejects_draft_platform(self):
+    def test_create_journal_endpoint_allows_draft_platform(self):
         draft_platform = Platform.objects.create(
             name="Draft API Platform",
             status=Platform.Status.BORRADOR,
@@ -193,7 +193,18 @@ class JournalAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
+        data = self._get_data(response)
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal_id=data["id"],
+                platform=draft_platform,
+            ).exists()
+        )
+        draft_platform.refresh_from_db()
+        self.assertEqual(draft_platform.status, Platform.Status.BORRADOR)
+        self.assertIsNone(draft_platform.validated_by)
+        self.assertIsNone(draft_platform.validated_at)
 
     def test_list_journals_returns_active_journals(self):
         """

@@ -738,6 +738,12 @@ class JournalSerializersTests(TestCase):
             user=self.system,
             explanation="Eliminada para prueba",
         )
+        self.platform.status = Platform.Status.BORRADOR
+        self.platform.validated_by = None
+        self.platform.validated_at = None
+        self.platform.save(
+            update_fields=["status", "validated_by", "validated_at"]
+        )
 
         serializer = serializers.JournalSerializer(
             instance=journal,
@@ -782,6 +788,8 @@ class JournalSerializersTests(TestCase):
         self.assertTrue(
             link.has_full_text
         )
+        self.platform.refresh_from_db()
+        self.assertEqual(self.platform.status, Platform.Status.BORRADOR)
 
     def test_duplicate_platforms_are_rejected(self):
         """
@@ -814,7 +822,7 @@ class JournalSerializersTests(TestCase):
             serializer.errors,
         )
 
-    def test_platform_relation_rejects_draft_platform(self):
+    def test_platform_relation_allows_draft_platform(self):
         draft_platform = Platform.objects.create(
             name="Draft Association",
             status=Platform.Status.BORRADOR,
@@ -829,10 +837,20 @@ class JournalSerializersTests(TestCase):
             }
         )
 
-        self.assertFalse(serializer.is_valid())
-        self.assertIn("platforms", serializer.errors)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform=draft_platform,
+            ).exists()
+        )
+        draft_platform.refresh_from_db()
+        self.assertEqual(draft_platform.status, Platform.Status.BORRADOR)
+        self.assertIsNone(draft_platform.validated_by)
+        self.assertIsNone(draft_platform.validated_at)
 
-    def test_platform_relation_rejects_obsolete_platform(self):
+    def test_platform_relation_allows_obsolete_platform(self):
         obsolete_platform = Platform.objects.create(
             name="Obsolete Association",
             status=Platform.Status.OBSOLETO,
@@ -847,8 +865,16 @@ class JournalSerializersTests(TestCase):
             }
         )
 
-        self.assertFalse(serializer.is_valid())
-        self.assertIn("platforms", serializer.errors)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform=obsolete_platform,
+            ).exists()
+        )
+        obsolete_platform.refresh_from_db()
+        self.assertEqual(obsolete_platform.status, Platform.Status.OBSOLETO)
 
     def test_platform_relation_allows_published_platform(self):
         serializer = serializers.JournalSerializer(
@@ -1169,12 +1195,10 @@ class JournalSerializersTests(TestCase):
 
         same_url = serializers.JournalSerializer(
             journal,
-            data={
-                "platforms": [{
-                    "platform": self.platform.pk,
-                    "journal_url": "https://8.8.4.4/journal/first",
-                }]
-            },
+            data={"platforms": [{
+                "platform": self.platform.pk,
+                "journal_url": "https://8.8.4.4/journal/first",
+            }]},
             partial=True,
         )
         self.assertTrue(same_url.is_valid(), same_url.errors)
@@ -1183,12 +1207,10 @@ class JournalSerializersTests(TestCase):
 
         new_url = serializers.JournalSerializer(
             journal,
-            data={
-                "platforms": [{
-                    "platform": self.platform.pk,
-                    "journal_url": "https://1.1.1.1/journal/second",
-                }]
-            },
+            data={"platforms": [{
+                "platform": self.platform.pk,
+                "journal_url": "https://1.1.1.1/journal/second",
+            }]},
             partial=True,
         )
         self.assertTrue(new_url.is_valid(), new_url.errors)
@@ -1209,3 +1231,49 @@ class JournalSerializersTests(TestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("platforms", serializer.errors)
+
+    def test_platform_relation_rejects_soft_deleted_platform(self):
+        deleted_platform = Platform.objects.create(
+            name="Deleted Association",
+            created_by=self.system,
+        )
+        deleted_platform.soft_delete(
+            user=self.system,
+            explanation="Eliminada para prueba",
+        )
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "9012-3456",
+                "title": "Deleted Platform Journal",
+                "platforms": [{"platform": deleted_platform.pk}],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("platforms", serializer.errors)
+
+    def test_update_can_add_draft_platform(self):
+        journal = self._journal(issn="9123-4567")
+        draft_platform = Platform.objects.create(
+            name="Draft Update Association",
+            status=Platform.Status.BORRADOR,
+            created_by=self.system,
+        )
+        serializer = serializers.JournalSerializer(
+            journal,
+            data={"platforms": [{"platform": draft_platform.pk}]},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(updated_by=self.system)
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform=draft_platform,
+            ).exists()
+        )
+        draft_platform.refresh_from_db()
+        self.assertEqual(draft_platform.status, Platform.Status.BORRADOR)
+        self.assertIsNone(draft_platform.validated_by)
+        self.assertIsNone(draft_platform.validated_at)
