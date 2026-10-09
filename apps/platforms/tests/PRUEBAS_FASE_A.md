@@ -2,7 +2,7 @@
 
 Estas pruebas documentan y validan el comportamiento integral del módulo `platforms` sin autenticación obligatoria del cliente, utilizando el usuario del sistema con `code=0`.
 
-**Cobertura actual: 43 pruebas** distribuidas entre modelos, serializadores,
+**Cobertura actual: 47 pruebas** distribuidas entre modelos, serializadores,
 servicios, clasificación y API.
 
 ---
@@ -151,6 +151,10 @@ Una plataforma que no tenga API de cosecha puede publicarse siempre que cumpla l
 | `test_public_filter_by_catalog_relations` | Se validan los filtros relacionales en singular, por ejemplo `?country=...`, respetando el estado activo de la relación y del catálogo. |
 | `test_create_platform_defaults_to_not_harvestable` | Un POST que omite `is_harvestable` persiste y devuelve `false`. |
 | `test_create_platform_accepts_explicit_not_harvestable` | Un POST con `is_harvestable=false` conserva explícitamente ese valor. |
+| `test_link_history_orders_checks_newest_first_and_pending_last` | El historial pagina después de ordenar las verificaciones más recientes y deja los registros sin verificar al final. |
+| `test_link_history_uses_created_at_and_id_as_tiebreakers` | Los empates de `last_check` se resuelven de forma determinística con `created_at` e identificador descendentes. |
+| `test_successful_check_is_consistent_with_history` | Un chequeo HTTP 200 coincide en la respuesta de la acción, el historial y `link_status`. |
+| `test_link_history_can_exclude_journal_urls` | El filtro `journal_platform__isnull=true` separa el historial general de las URLs contextuales de Journals. |
 
 ### 2.5. Clasificación derivada (`apps/platforms/tests/test_classification.py`)
 
@@ -272,16 +276,16 @@ Los serializers públicos no deben exponer:
 
 ## 6. Estado actual de la Fase A
 
-La suite actual contiene 43 pruebas:
+La suite actual contiene 47 pruebas:
 
 ```text
 Modelos:           6
 Serializadores:   21
 Servicios:         7
 Clasificación:     2
-API:               7
+API:              11
 --------------------
-TOTAL:             43
+TOTAL:             47
 ```
 
 ---
@@ -336,4 +340,4 @@ Las reglas principales verificadas son:
 - Filtros y endpoints públicos.
 - Documentación de la API mediante Swagger/OpenAPI.
 
-**Cobertura documentada: 43 pruebas para la Fase A de `platforms`.**
+**Cobertura documentada: 47 pruebas para la Fase A de `platforms`.**
