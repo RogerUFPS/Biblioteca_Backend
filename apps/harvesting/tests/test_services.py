@@ -10,6 +10,7 @@ from apps.harvesting.models import Harvest, Schedule, ScheduleEvent
 from apps.harvesting.services import (
     OpenAlexHarvester,
     _next_occurrence,
+    get_harvester_for_platform,
     run_scheduled_harvests,
 )
 from apps.journal.models import Journal, SharedJournalPlatform
@@ -26,7 +27,9 @@ class HarvestingServicesTestCase(TestCase):
         )
         cls.platform = Platform.objects.create(
             name="OpenAlex Services Test",
+            status=Platform.Status.PUBLICADO,
             base_api_url="https://api.openalex.org",
+            is_harvestable=True,
             created_by=cls.user,
         )
 
@@ -226,7 +229,9 @@ class HarvestingServicesTestCase(TestCase):
         execute_harvest.side_effect = complete_harvest
         second_platform = Platform.objects.create(
             name="Second Harvest Platform",
+            status=Platform.Status.PUBLICADO,
             base_api_url="https://api.openalex.org",
+            is_harvestable=True,
             created_by=self.user,
         )
         now = timezone.now()
@@ -248,6 +253,43 @@ class HarvestingServicesTestCase(TestCase):
         next_harvests = run_scheduled_harvests(now=now + timedelta(days=1))
         self.assertEqual(len(next_harvests), 2)
         self.assertEqual(schedule.events.count(), 2)
+
+    def test_scheduled_harvest_fails_if_platform_was_disabled(self):
+        self.platform.is_harvestable = False
+        self.platform.save(update_fields=["is_harvestable"])
+        now = timezone.now()
+        schedule = Schedule.objects.create(
+            frequency=Schedule.Frequency.ONCE,
+            max_quantity=10,
+            start_date=now - timedelta(minutes=1),
+            created_by=self.user,
+        )
+        schedule.platforms.add(self.platform)
+
+        harvests = run_scheduled_harvests(now=now)
+
+        self.assertEqual(len(harvests), 1)
+        self.assertEqual(harvests[0].state, Harvest.State.FAILED)
+        self.assertIn("no está habilitada para cosecha", harvests[0].error_message)
+        self.assertEqual(schedule.events.get().state, ScheduleEvent.State.FAILED)
+
+    def test_non_harvestable_platform_has_no_harvester(self):
+        self.platform.is_harvestable = False
+        self.platform.save(update_fields=["is_harvestable"])
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=10,
+            created_by=self.user,
+        )
+
+        with self.assertRaisesMessage(ValueError, "is_harvestable=false"):
+            get_harvester_for_platform(harvest)
+
+        with self.assertRaisesMessage(ValueError, "is_harvestable=false"):
+            OpenAlexHarvester(harvest, user=self.user).harvest_records()
+
+        harvest.refresh_from_db()
+        self.assertEqual(harvest.state, Harvest.State.PENDING)
 
     def test_max_quantity_counts_failed_records_too(self):
         response = MagicMock(spec=httpx.Response)

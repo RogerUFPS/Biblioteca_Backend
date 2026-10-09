@@ -19,6 +19,7 @@ class HarvestingViewsTestCase(APITestCase):
         cls.platform = Platform.objects.create(
             name="OpenAlex Test",
             base_api_url="https://api.openalex.org",
+            is_harvestable=True,
             created_by=cls.user,
         )
 
@@ -59,6 +60,36 @@ class HarvestingViewsTestCase(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("start_date", response.data)
+
+    def test_schedule_rejects_non_harvestable_platform(self):
+        self.platform.is_harvestable = False
+        self.platform.save(update_fields=["is_harvestable"])
+
+        response = self.client.post(
+            "/api/harvesting/schedules/",
+            {
+                "platforms": [self.platform.pk],
+                "frequency": "daily",
+                "max_quantity": 10,
+                "start_date": timezone.now().isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("platforms", response.data)
+        self.assertIn(self.platform.name, str(response.data["platforms"]))
+        self.assertEqual(Schedule.objects.count(), 0)
+
+    @patch("apps.harvesting.views.services.run_scheduled_harvests", return_value=[])
+    def test_run_due_executes_scheduled_harvests_without_token(self, run_scheduled):
+        response = self.client.post(
+            "/api/harvesting/schedules/run-due/",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [])
+        run_scheduled.assert_called_once_with()
 
     def test_harvest_and_event_endpoints_are_read_only(self):
         schedule = Schedule.objects.create(
