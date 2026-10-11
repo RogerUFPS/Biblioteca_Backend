@@ -13,7 +13,9 @@ class AuditAPITests(APITestCase):
             code=0,
             full_name="Sistema",
             email="sistema@example.com",
+            is_superadmin=True,
         )
+        self.client.force_authenticate(user=self.user)
         AuditLog.objects.all().delete()
         self.inst_ct = ContentType.objects.get_for_model(Institution)
         self.lang_ct = ContentType.objects.get_for_model(Language)
@@ -142,7 +144,9 @@ class AuditAPITests(APITestCase):
         results_anon = response_anon.json()["results"]
         self.assertEqual(len(results_anon), 2)
 
-        response_auth = self.client.get("/api/audit/logs/?is_anonymous=false")
+        response_auth = self.client.get(
+            "/api/audit/logs/?is_anonymous=false&action=0"
+        )
         self.assertEqual(response_auth.status_code, status.HTTP_200_OK)
         results_auth = response_auth.json()["results"]
         self.assertEqual(len(results_auth), 1)

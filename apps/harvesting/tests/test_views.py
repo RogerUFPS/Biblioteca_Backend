@@ -15,6 +15,7 @@ class HarvestingViewsTestCase(APITestCase):
             code=0,
             full_name="Sistema",
             email="sistema@test.local",
+            is_superadmin=True,
         )
         cls.platform = Platform.objects.create(
             name="OpenAlex Test",
@@ -22,6 +23,9 @@ class HarvestingViewsTestCase(APITestCase):
             is_harvestable=True,
             created_by=cls.user,
         )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
 
     def test_schedule_crud_operations(self):
         payload = {
