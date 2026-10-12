@@ -141,6 +141,14 @@ El detalle contiene `schedule`, `scheduled_for`, `state`, `started_at`,
 Los Harvest son registros administrados por el sistema: no se pueden crear,
 editar ni eliminar directamente.
 
+Al cosechar desde OpenAlex, cada Source se envía a `create_journal()` con el ID
+de la plataforma del Harvest como `platform_id` y `homepage_url` como
+`journal_url`. La URL es obligatoria en Journal; si OpenAlex no la entrega o no
+pasa su validación, el Source se contabiliza en `records_failed`. No se envían
+los campos `active` ni `license`: el estado de publicación/validación se
+gestiona desde Journal y las licencias no se importan en este flujo; sus
+asociaciones se administran mediante el catálogo de licencias.
+
 | Método | Ruta | Request body | Respuesta |
 | --- | --- | --- | --- |
 | `GET` | `/` | Ninguno. Acepta filtros, búsqueda y paginación. | `200`: lista paginada de Harvest. |
