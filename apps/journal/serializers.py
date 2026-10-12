@@ -243,6 +243,13 @@ class JournalPlatformRelationSerializer(
                 field_name="platform",
             )
 
+        platform = attrs.get("platform")
+        if platform:
+            validate_platform_for_journal_association(
+                platform,
+                field_name="platform",
+            )
+
         return attrs
 
 
