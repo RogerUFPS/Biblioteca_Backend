@@ -98,6 +98,7 @@ class PlatformSerializersTests(TestCase):
         """Persiste la API Key cifrada y sincroniza relaciones."""
         data = {
             "name": "Redalyc",
+            "public_url": "https://8.8.8.8/redalyc",
             "is_harvestable": True,
             "base_api_url": "https://www.redalyc.org",
             "api_key": "my-plain-text-key",
@@ -167,6 +168,7 @@ class PlatformSerializersTests(TestCase):
         """La clasificación manual se ignora porque ambos campos son read-only."""
         data = {
             "name": "Scielo",
+            "public_url": "https://8.8.8.8/scielo",
             "academic_programs": [
                 self.academic_program.pk,
                 self.academic_program_secondary.pk,
@@ -221,6 +223,7 @@ class PlatformSerializersTests(TestCase):
         """Las knowledge_areas no forman parte de la entrada del usuario."""
         data = {
             "name": "JSTOR",
+            "public_url": "https://8.8.8.8/jstor",
             "knowledge_areas": [
                 self.knowledge_area.pk,
             ],
@@ -267,6 +270,7 @@ class PlatformSerializersTests(TestCase):
         """Una plataforma de referencia puede existir sin API ni API Key."""
         data = {
             "name": "Plataforma Referencia",
+            "public_url": "https://8.8.8.8/reference",
             "base_api_url": None,
             "api_key": None,
         }
@@ -306,6 +310,7 @@ class PlatformSerializersTests(TestCase):
         """Una plataforma puede tener API sin requerir una API Key."""
         data = {
             "name": "API Publica",
+            "public_url": "https://8.8.8.8/public-api",
             "is_harvestable": True,
             "base_api_url": "https://api.publica.org",
             "api_key": None,
@@ -339,6 +344,7 @@ class PlatformSerializersTests(TestCase):
         """Nunca debe existir una API Key asociada a ninguna API base."""
         data = {
             "name": "Configuracion Invalida",
+            "public_url": "https://8.8.8.8/invalid-config",
             "base_api_url": None,
             "api_key": "orphan-key",
         }
@@ -665,6 +671,7 @@ class PlatformSerializersTests(TestCase):
 
         data = {
             "name": "Plataforma Archivada",
+            "public_url": "https://8.8.8.8/reactivated",
             "is_harvestable": True,
             "base_api_url": "https://reactivada.org",
         }
@@ -810,7 +817,11 @@ class PlatformSerializersTests(TestCase):
 
     def test_harvestable_platform_requires_base_api_url(self):
         serializer = serializers.PlatformSerializer(
-            data={"name": "Sin API", "is_harvestable": True}
+            data={
+                "name": "Sin API",
+                "public_url": "https://8.8.8.8/without-api",
+                "is_harvestable": True,
+            }
         )
 
         self.assertFalse(serializer.is_valid())
@@ -820,6 +831,7 @@ class PlatformSerializersTests(TestCase):
         serializer = serializers.PlatformSerializer(
             data={
                 "name": "Configuración contradictoria",
+                "public_url": "https://8.8.8.8/contradictory",
                 "is_harvestable": False,
                 "base_api_url": "https://api.example.org",
             }

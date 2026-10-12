@@ -188,7 +188,10 @@ class PlatformAPITests(APITestCase):
     def test_create_platform_defaults_to_not_harvestable(self):
         response = self.client.post(
             "/api/platforms/",
-            {"name": "Referencia por defecto"},
+            {
+                "name": "Referencia por defecto",
+                "public_url": "https://8.8.8.8/reference-default",
+            },
             format="json",
         )
         data = self._get_data(response)
@@ -205,6 +208,7 @@ class PlatformAPITests(APITestCase):
             {
                 "name": "Referencia explícita",
                 "is_harvestable": False,
+                "public_url": "https://8.8.8.8/reference-explicit",
             },
             format="json",
         )
