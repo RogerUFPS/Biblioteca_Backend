@@ -809,17 +809,19 @@ class PlatformPublicSerializer(
         latest_log = services.latest_platform_link_log(obj)
 
         if latest_log:
-            return {
+            data = {
                 "url": latest_log.url,
                 "is_active": latest_log.is_active,
                 "last_check": latest_log.last_check,
             }
+        else:
+            data = {
+                "url": None,
+                "is_active": None,
+                "last_check": None,
+            }
 
-        return {
-            "url": None,
-            "is_active": None,
-            "last_check": None,
-        }
+        return PlatformPublicLinkStatusSchemaSerializer(data).data
 
     @extend_schema_field(serializers.URLField(allow_null=True))
     def get_public_url(self, obj):
