@@ -315,11 +315,8 @@ class OpenAlexHarvester:
             return
 
         title = item.get("display_name") or ""
+        journal_url = item.get("homepage_url")
         url_image = item.get("image_url") or item.get("image_thumbnail_url")
-        active = item.get("is_active")
-        if not isinstance(active, bool):
-            is_deprecated = item.get("is_deprecated")
-            active = not is_deprecated if isinstance(is_deprecated, bool) else None
         has_apc = _source_has_apc(item)
         has_full_text = item.get("is_oa")
 
@@ -354,13 +351,12 @@ class OpenAlexHarvester:
                 issn=issn,
                 title=title,
                 user=self.user,
+                platform_id=harvest.platform_id,
+                journal_url=journal_url,
                 editorial_id=editorial_id,
-                license=item.get("license") or None,
                 url_image=url_image,
                 has_apc=has_apc,
-                active=active,
                 country_ids=country_ids,
-                platform_id=harvest.platform_id,
                 has_full_text=has_full_text,
             )
             if is_existing:
