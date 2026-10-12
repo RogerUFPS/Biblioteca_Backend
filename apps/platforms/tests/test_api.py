@@ -1,5 +1,8 @@
+from datetime import timedelta
 from typing import Any, cast
+from unittest.mock import patch
 
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.test import APITestCase
 
@@ -13,6 +16,7 @@ from apps.catalog.models import (
     MaterialType,
 )
 from apps.platforms import models, services
+from apps.journal.models import Journal, SharedJournalPlatform
 
 
 class PlatformAPITests(APITestCase):
@@ -184,7 +188,10 @@ class PlatformAPITests(APITestCase):
     def test_create_platform_defaults_to_not_harvestable(self):
         response = self.client.post(
             "/api/platforms/",
-            {"name": "Referencia por defecto"},
+            {
+                "name": "Referencia por defecto",
+                "public_url": "https://8.8.8.8/reference-default",
+            },
             format="json",
         )
         data = self._get_data(response)
@@ -201,6 +208,7 @@ class PlatformAPITests(APITestCase):
             {
                 "name": "Referencia explícita",
                 "is_harvestable": False,
+                "public_url": "https://8.8.8.8/reference-explicit",
             },
             format="json",
         )
@@ -354,3 +362,160 @@ class PlatformAPITests(APITestCase):
             len(data_empty["results"]),
             0,
         )
+
+    def test_link_history_orders_checks_newest_first_and_pending_last(self):
+        platform = models.Platform.objects.create(
+            name="Historial ordenado",
+            created_by=self.system,
+        )
+        now = timezone.now()
+        oldest = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://8.8.8.8/oldest",
+            http_status_code=500,
+            is_active=False,
+            fail_count=1,
+            last_check=now - timedelta(hours=2),
+            created_by=self.system,
+        )
+        newest = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://8.8.8.8/newest",
+            http_status_code=200,
+            is_active=True,
+            last_check=now,
+            created_by=self.system,
+        )
+        pending = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://8.8.8.8/pending",
+            created_by=self.system,
+        )
+
+        response = self.client.get(
+            f"/api/platforms/link-check-logs/?platform={platform.pk}"
+            "&page_size=2"
+        )
+        data = self._get_data(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["total_items"], 3)
+        self.assertEqual(
+            [item["id"] for item in data["results"]],
+            [newest.pk, oldest.pk],
+        )
+        second_page = self.client.get(
+            f"/api/platforms/link-check-logs/?platform={platform.pk}"
+            "&page_size=2&page=2"
+        )
+        second_page_data = self._get_data(second_page)
+        self.assertEqual(second_page_data["results"][0]["id"], pending.pk)
+        self.assertIsNone(second_page_data["results"][0]["last_check"])
+
+    def test_link_history_uses_created_at_and_id_as_tiebreakers(self):
+        platform = models.Platform.objects.create(
+            name="Historial con empate",
+            created_by=self.system,
+        )
+        checked_at = timezone.now()
+        first = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://8.8.8.8/first",
+            last_check=checked_at,
+            created_by=self.system,
+        )
+        second = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://8.8.8.8/second",
+            last_check=checked_at,
+            created_by=self.system,
+        )
+        same_created_at = timezone.now() - timedelta(hours=1)
+        models.LinkCheckLog.all_objects.filter(
+            pk__in=[first.pk, second.pk]
+        ).update(created_at=same_created_at)
+
+        response = self.client.get(
+            f"/api/platforms/link-check-logs/?platform={platform.pk}"
+        )
+        data = self._get_data(response)
+
+        self.assertEqual(
+            [item["id"] for item in data["results"]],
+            [second.pk, first.pk],
+        )
+
+    @patch("apps.platforms.services._perform_link_check", return_value=(200, True))
+    @patch("apps.platforms.services._validate_safe_http_url")
+    def test_successful_check_is_consistent_with_history(
+        self,
+        _mock_validate,
+        _mock_check,
+    ):
+        platform = models.Platform.objects.create(
+            name="Chequeo coherente",
+            status=models.Platform.Status.PUBLICADO,
+            created_by=self.system,
+        )
+        response = self.client.post(
+            f"/api/platforms/{platform.pk}/check-link/",
+            {"url": "https://www.example.org"},
+            format="json",
+        )
+        checked = self._get_data(response)
+        history_response = self.client.get(
+            f"/api/platforms/link-check-logs/?platform={platform.pk}"
+            "&journal_platform__isnull=true"
+        )
+        history = self._get_data(history_response)["results"][0]
+        public_response = self.client.get(
+            f"/api/platforms/public/{platform.pk}/"
+        )
+        link_status = self._get_data(public_response)["link_status"]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(history["id"], checked["id"])
+        self.assertEqual(history["http_status_code"], 200)
+        self.assertTrue(history["is_active"])
+        self.assertEqual(history["fail_count"], 0)
+        self.assertEqual(history["last_check"], checked["last_check"])
+        self.assertEqual(link_status["is_active"], history["is_active"])
+        self.assertEqual(link_status["last_check"], history["last_check"])
+
+    def test_link_history_can_exclude_journal_urls(self):
+        platform = models.Platform.objects.create(
+            name="Historial por contexto",
+            created_by=self.system,
+        )
+        journal = Journal.objects.create(
+            issn="1234-5678",
+            title="Revista contextual",
+            created_by=self.system,
+        )
+        relation = SharedJournalPlatform.objects.create(
+            journal=journal,
+            platform=platform,
+            created_by=self.system,
+        )
+        general = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://8.8.8.8/general",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+        models.LinkCheckLog.objects.create(
+            platform=platform,
+            journal_platform=relation,
+            url="https://8.8.8.8/journal",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+
+        response = self.client.get(
+            f"/api/platforms/link-check-logs/?platform={platform.pk}"
+            "&journal_platform__isnull=true"
+        )
+        data = self._get_data(response)
+
+        self.assertEqual(data["total_items"], 1)
+        self.assertEqual(data["results"][0]["id"], general.pk)

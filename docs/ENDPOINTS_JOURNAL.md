@@ -72,7 +72,8 @@ Las tablas intermedias `SharedJournal*` no tienen endpoints CRUD independientes.
 issn
 title
 editorial
-license
+publication_date
+licenses
 url_image
 has_apc
 start_period
@@ -168,7 +169,7 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 En las respuestas, cada relación incluye además:
 
 - `public_url`: URL general navegable de la plataforma, tomada del último `LinkCheckLog` no eliminado cuyo `journal_platform` es nulo.
-- `journal_url`: campo virtual opcional de escritura y respuesta. La URL se toma del último `LinkCheckLog` no eliminado asociado al `SharedJournalPlatform` correspondiente.
+- `journal_url`: campo virtual obligatorio para relaciones nuevas y opcional al actualizar una relación existente. La URL se toma del último `LinkCheckLog` no eliminado asociado al `SharedJournalPlatform` correspondiente.
 
 Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de estos valores se obtiene de `base_api_url`, que está reservado para harvesting, ni se persiste en `Journal`, `Platform` o `SharedJournalPlatform`.
 
@@ -232,7 +233,13 @@ lógicamente. No se exige que esté `PUBLICADO`.
 | POST | `/api/journals/{id}/publish/` | Activar y validar revista | 200 |
 | POST | `/api/journals/{id}/deactivate/` | Marcar revista como inactiva | 200 |
 
-`active`, `validated_by` y `validated_at` no se modifican directamente desde el serializer administrativo.
+`active`, `validated_by` y `validated_at` son campos de solo lectura en el
+serializer administrativo. El cliente puede consultarlos, pero no controlarlos
+mediante `POST`, `PUT` o `PATCH`.
+
+Crear una revista, manualmente o mediante harvesting, siempre la deja pendiente
+de publicación: `active=false`, `validated_by=null` y `validated_at=null`. La
+única operación que la publica es `POST /api/journals/{id}/publish/`.
 
 Una actualización de la ficha limpia la validación previa. Por tanto, una revista modificada debe publicarse nuevamente antes de regresar a la consulta pública.
 
@@ -248,6 +255,7 @@ Para aparecer en la consulta pública una revista debe cumplir simultáneamente:
 ```text
 active = True
 validated_at != null
+deleted_at = null
 ```
 
 Las revistas eliminadas lógicamente tampoco aparecen.
@@ -263,17 +271,23 @@ curl -X POST http://localhost:8000/api/journals/ \
     "issn": "1476 4687",
     "title": "Nature",
     "editorial": 1,
-    "license": "CC BY",
+    "publication_date": "1869-11-04",
     "has_apc": false,
-    "start_period": "1869-01-01",
     "languages": [1],
     "countries": [1],
     "material_types": [1],
-    "academic_programs": [1]
+    "academic_programs": [1],
+    "platforms": [{
+      "platform": 1,
+      "journal_url": "https://example.org/nature",
+      "start_period": "1869-11-04"
+    }]
   }'
 ```
 
-El ISSN se almacena normalizado como `1476-4687`.
+El ISSN se almacena normalizado como `1476-4687`. La revista se crea pendiente:
+`active=false`, `validated_by=null` y `validated_at=null`, aunque el cliente
+intente enviar valores diferentes para esos campos de solo lectura.
 
 La respuesta incluye las `knowledge_areas` derivadas automáticamente de `academic_programs`.
 
@@ -289,6 +303,7 @@ curl -X POST http://localhost:8000/api/journals/ \
     "platforms": [
       {
         "platform": 1,
+        "journal_url": "https://revista.ejemplo.org/",
         "start_period": "2020-01-01",
         "finish_period": null,
         "has_full_text": true
@@ -324,7 +339,7 @@ curl -X PATCH http://localhost:8000/api/journals/1/ \
 ```bash
 curl -X PATCH http://localhost:8000/api/journals/1/ \
   -H "Content-Type: application/json" \
-  -d '{"license":"CC BY 4.0"}'
+  -d '{"publication_date":"1869-11-04"}'
 ```
 
 Al no enviar `academic_programs`, las relaciones existentes permanecen iguales.
@@ -351,7 +366,10 @@ validated_at = fecha actual
 curl -X POST http://localhost:8000/api/journals/1/deactivate/
 ```
 
-La revista deja de aparecer en la consulta pública.
+La revista queda con `active=false` y deja de aparecer en la consulta pública.
+La acción conserva `validated_by` y `validated_at` como historial de su última
+validación. Una llamada posterior a `/publish/` actualiza nuevamente esos datos
+y puede volver a publicarla.
 
 ### 6.8. Listar revistas públicas
 
@@ -458,10 +476,8 @@ material_type
 academic_program
 platform
 has_apc
-start_period_from
-start_period_to
-finish_period_from
-finish_period_to
+publication_date_from
+publication_date_to
 ```
 
 Ejemplos:
@@ -474,7 +490,7 @@ curl "http://localhost:8000/api/journals/public/?knowledge_area=1"
 curl "http://localhost:8000/api/journals/public/?academic_program=1"
 curl "http://localhost:8000/api/journals/public/?platform=1"
 curl "http://localhost:8000/api/journals/public/?has_apc=false"
-curl "http://localhost:8000/api/journals/public/?start_period_from=2020-01-01"
+curl "http://localhost:8000/api/journals/public/?publication_date_from=2020-01-01"
 ```
 
 El filtro `platform` únicamente considera relaciones con plataformas que continúan en estado `PUBLICADO`.
@@ -569,3 +585,20 @@ no están eliminados, `active=true` y `validated_at` no es nulo. Los vínculos
 nuevos o restaurados admiten Platforms en cualquier estado, siempre que no
 estén eliminadas. Asociar una Platform no cambia su estado ni sus datos de
 validación.
+## Contrato estructural vigente
+
+- `publication_date` es la fecha propia de publicación/origen de la revista.
+- Los periodos de cobertura existen exclusivamente en cada relación incluida en
+  `platforms` (`start_period` y `finish_period`).
+- Toda relación nueva requiere `journal_url`; se registra en `LinkCheckLog` y no
+  como columna de Journal o `SharedJournalPlatform`.
+- Una Journal nueva requiere al menos una Platform.
+- `licenses` expone las licencias asociadas. Las licencias se administran en
+  `/api/journals/licenses/`.
+- `POST /api/journals/{id}/publish/` acepta opcionalmente
+  `{"licenses": [1, 2]}`. Omitir el campo conserva las relaciones y enviar una
+  lista vacía las elimina lógicamente. Todavía se permite publicar sin licencia.
+- El servicio `create_journal()` exige `platform_id` y `journal_url`, no recibe
+  licencias y registra la URL contextual de forma atómica.
+
+Pendiente: evaluar que una licencia sea obligatoria para publicar.

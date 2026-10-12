@@ -13,8 +13,30 @@ from apps.catalog.models import (
     MaterialType,
     SharedAcademicProgramKnowledgeArea,
 )
-from apps.journal import models, services
+from apps.journal import models, services as journal_services
 from apps.platforms.models import Platform
+
+
+class _JournalServicesTestAdapter:
+    """Adapta casos históricos al contrato contextual de create_journal."""
+
+    @staticmethod
+    def create_journal(**kwargs):
+        kwargs.pop("license", None)
+        kwargs.pop("active", None)
+        start_period = kwargs.pop("start_period", None)
+        finish_period = kwargs.pop("finish_period", None)
+        if start_period is not None:
+            kwargs.setdefault("platform_start_period", start_period)
+        if finish_period is not None:
+            kwargs.setdefault("platform_finish_period", finish_period)
+        kwargs.setdefault("platform_id", Platform.objects.first().pk)
+        compact_issn = str(kwargs.get("issn", "journal")).replace("-", "")
+        kwargs.setdefault("journal_url", f"https://8.8.8.8/{compact_issn}")
+        return journal_services.create_journal(**kwargs)
+
+
+services = _JournalServicesTestAdapter()
 
 
 class JournalServicesTests(TestCase):
@@ -100,6 +122,10 @@ class JournalServicesTests(TestCase):
         )
 
         self.assertIsNotNone(journal.pk)
+
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
 
         self.assertEqual(
             journal.issn,
@@ -232,11 +258,6 @@ class JournalServicesTests(TestCase):
     updated.title,
     "Journal Actualizado",
 )
-
-        self.assertEqual(
-            updated.license,
-            "CC BY",
-        )
 
     # ==========================================================================
     # RESTAURACIÓN
@@ -558,7 +579,7 @@ class JournalServicesTests(TestCase):
             )
 
         self.assertIn(
-            "finish_period",
+            "platform_finish_period",
             context.exception.detail,
         )
 

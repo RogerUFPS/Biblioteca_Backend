@@ -113,6 +113,34 @@ class JournalSerializersTests(TestCase):
     # CREACIÓN Y NORMALIZACIÓN
     # ==========================================================================
 
+    def test_publication_fields_are_read_only(self):
+        serializer = serializers.JournalSerializer()
+
+        for field_name in ("active", "validated_by", "validated_at"):
+            self.assertTrue(serializer.fields[field_name].read_only)
+
+    def test_create_ignores_client_controlled_publication_fields(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "1010-2020",
+                "title": "Journal pendiente",
+                "active": True,
+                "validated_by": self.system.pk,
+                "validated_at": timezone.now().isoformat(),
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/pending",
+                }],
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
+
     def test_journal_serializer_create_with_all_relations(self):
         """
         Crea una revista y sincroniza las seis relaciones configuradas.
@@ -121,7 +149,7 @@ class JournalSerializersTests(TestCase):
             "issn": "1234 567X",
             "title": "Journal de Ingeniería",
             "editorial": self.editorial.pk,
-            "license": "CC BY",
+            "publication_date": "2020-01-01",
             "has_apc": False,
             "start_period": "2020-01-01",
             "languages": [self.language.pk],
@@ -133,6 +161,7 @@ class JournalSerializersTests(TestCase):
             "platforms": [
                 {
                     "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/engineering",
                     "start_period": "2021-01-01",
                     "finish_period": "2026-12-31",
                     "has_full_text": True,
@@ -214,6 +243,10 @@ class JournalSerializersTests(TestCase):
             data={
                 "issn": " 1234 567x ",
                 "title": "ISSN Normalizado",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/normalized",
+                }],
             }
         )
 
@@ -307,6 +340,10 @@ class JournalSerializersTests(TestCase):
                     self.academic_program.pk,
                     self.academic_program_secondary.pk,
                 ],
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/derived",
+                }],
             }
         )
 
@@ -334,6 +371,10 @@ class JournalSerializersTests(TestCase):
                 "title": "Journal Read Only",
                 "knowledge_areas": [999999],
                 "academic_programs": [self.academic_program.pk],
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/read-only",
+                }],
             }
         )
 
@@ -461,6 +502,7 @@ class JournalSerializersTests(TestCase):
                         "start_period": "2020-01-01",
                         "finish_period": "2026-12-31",
                         "has_full_text": True,
+                        "journal_url": "https://8.8.8.8/soft-delete",
                     }
                 ],
             },
@@ -630,6 +672,7 @@ class JournalSerializersTests(TestCase):
                         "start_period": "2020-01-01",
                         "finish_period": "2025-12-31",
                         "has_full_text": False,
+                        "journal_url": "https://8.8.8.8/platform-update",
                     }
                 ]
             },
@@ -754,6 +797,7 @@ class JournalSerializersTests(TestCase):
                         "start_period": "2021-01-01",
                         "finish_period": "2026-12-31",
                         "has_full_text": True,
+                        "journal_url": "https://8.8.8.8/restored-link",
                     }
                 ]
             },
@@ -833,7 +877,10 @@ class JournalSerializersTests(TestCase):
             data={
                 "issn": "6789-0123",
                 "title": "Draft Association Journal",
-                "platforms": [{"platform": draft_platform.pk}],
+                "platforms": [{
+                    "platform": draft_platform.pk,
+                    "journal_url": "https://8.8.8.8/draft",
+                }],
             }
         )
 
@@ -861,7 +908,10 @@ class JournalSerializersTests(TestCase):
             data={
                 "issn": "7890-1234",
                 "title": "Obsolete Association Journal",
-                "platforms": [{"platform": obsolete_platform.pk}],
+                "platforms": [{
+                    "platform": obsolete_platform.pk,
+                    "journal_url": "https://8.8.8.8/obsolete",
+                }],
             }
         )
 
@@ -881,7 +931,10 @@ class JournalSerializersTests(TestCase):
             data={
                 "issn": "8901-2345",
                 "title": "Published Association Journal",
-                "platforms": [{"platform": self.platform.pk}],
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/published",
+                }],
             }
         )
 
@@ -1261,7 +1314,10 @@ class JournalSerializersTests(TestCase):
         )
         serializer = serializers.JournalSerializer(
             journal,
-            data={"platforms": [{"platform": draft_platform.pk}]},
+            data={"platforms": [{
+                "platform": draft_platform.pk,
+                "journal_url": "https://8.8.8.8/draft-update",
+            }]},
             partial=True,
         )
 
