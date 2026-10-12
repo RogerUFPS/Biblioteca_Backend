@@ -222,3 +222,12 @@ docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web 
 
 La bandera `--keepdb` es recomendada al utilizar PostgreSQL / Neon DB para conservar la base de datos temporal de pruebas, evitando la recreación de la base en cada ejecución y reduciendo problemas asociados al cierre de conexiones.
 
+## Fase estructural: fechas, licencias y URL contextual
+
+La cobertura temporal se prueba exclusivamente sobre `SharedJournalPlatform` y
+contra el rango de su Platform. Journal expone `publication_date` y ya no posee
+`start_period`, `finish_period` ni el string `license`.
+
+También se cubren las licencias múltiples, su sincronización opcional durante
+`publish`, la obligatoriedad de Platform y `journal_url` en nuevas Journals, y
+el almacenamiento de la URL exclusivamente en `LinkCheckLog`.

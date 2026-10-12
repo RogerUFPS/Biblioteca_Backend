@@ -466,6 +466,21 @@ class PlatformViewSet(AuditableViewSet):
         )
 
     @extend_schema(
+        summary="Verificar todos los enlaces vigentes de una plataforma",
+        request=None,
+        responses={200: serializers.PlatformLinksCheckResponseSerializer},
+        tags=["Plataformas - Verificación de enlaces"],
+    )
+    @action(detail=True, methods=["post"], url_path="check-links")
+    def check_links(self, request, pk=None):
+        result = services.check_platform_links(
+            platform=self.get_object(),
+            user=get_acting_user(request),
+        )
+        data = serializers.PlatformLinksCheckResponseSerializer(result).data
+        return Response(data, status=status.HTTP_200_OK)
+
+    @extend_schema(
         summary="Restaurar plataforma eliminada",
         description=(
             "Restaura una plataforma eliminada mediante Soft Delete. "
