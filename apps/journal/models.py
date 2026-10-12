@@ -41,13 +41,6 @@ class Journal(AuditableModel):
         help_text="Editorial responsable de la publicación.",
     )
 
-    license = models.CharField(
-        max_length=255,
-        null=True,
-        blank=True,
-        help_text="Licencia bajo la cual se distribuye la revista.",
-    )
-
     url_image = models.URLField(
         max_length=500,
         null=True,
@@ -65,16 +58,10 @@ class Journal(AuditableModel):
         help_text="Indica si la revista se encuentra actualmente activa.",
     )
 
-    start_period = models.DateField(
+    publication_date = models.DateField(
         null=True,
         blank=True,
-        help_text="Fecha o período inicial de cobertura.",
-    )
-
-    finish_period = models.DateField(
-        null=True,
-        blank=True,
-        help_text="Fecha o período final de cobertura (vacío si continúa activa).",
+        help_text="Fecha propia de publicación u origen de la revista.",
     )
 
     validated_by = models.ForeignKey(
@@ -107,6 +94,22 @@ class Journal(AuditableModel):
 
     def __str__(self):
         return f"{self.title} ({self.issn})"
+
+
+class License(AuditableModel):
+    name = models.CharField(max_length=255)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                name="unique_journal_license_name_ci",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
 
 
 # ==============================================================================
@@ -303,3 +306,28 @@ class SharedJournalPlatform(AuditableModel):
 
     def __str__(self):
         return f"{self.journal} <-> {self.platform}"
+
+
+class SharedJournalLicense(AuditableModel):
+    journal = models.ForeignKey(
+        Journal,
+        on_delete=models.PROTECT,
+        related_name="license_links",
+    )
+    license = models.ForeignKey(
+        License,
+        on_delete=models.PROTECT,
+        related_name="journal_links",
+    )
+
+    class Meta:
+        ordering = ["journal_id", "license_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["journal", "license"],
+                name="unique_journal_license",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.journal} <-> {self.license}"

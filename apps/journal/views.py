@@ -24,6 +24,13 @@ from apps.platforms import services as platform_services
 from .classification import related_platform_ids
 
 
+class LicenseViewSet(AuditableViewSet):
+    queryset = models.License.objects.all()
+    serializer_class = serializers.LicenseSerializer
+    search_fields = ["name"]
+    ordering_fields = ["name", "created_at", "updated_at"]
+
+
 def _with_platform_urls(queryset, *, published_only=False):
     platform_links = (
         models.SharedJournalPlatform.objects
@@ -172,8 +179,7 @@ class JournalViewSet(AuditableViewSet):
     ordering_fields = [
         "title",
         "issn",
-        "start_period",
-        "finish_period",
+        "publication_date",
         "created_at",
         "updated_at",
         "fetched_at",
@@ -202,7 +208,7 @@ class JournalViewSet(AuditableViewSet):
             "Valida explícitamente la ficha de una revista "
             "y la habilita para consulta pública."
         ),
-        request=None,
+        request=serializers.JournalPublishSerializer,
         responses={
             200: serializers.JournalSerializer,
         },
@@ -218,6 +224,30 @@ class JournalViewSet(AuditableViewSet):
         journal = self.get_object()
         user = get_acting_user(request)
         now = timezone.now()
+        body = serializers.JournalPublishSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+
+        if "licenses" in body.validated_data:
+            selected = {item.pk for item in body.validated_data["licenses"]}
+            existing = {
+                link.license_id: link
+                for link in models.SharedJournalLicense.all_objects.filter(journal=journal)
+            }
+            for license_id, link in existing.items():
+                if license_id in selected:
+                    if link.is_deleted:
+                        link.restore()
+                elif not link.is_deleted:
+                    link.soft_delete(
+                        user=user,
+                        explanation="Licencia retirada durante la publicación.",
+                    )
+            for license_id in selected - existing.keys():
+                models.SharedJournalLicense.objects.create(
+                    journal=journal,
+                    license_id=license_id,
+                    created_by=user,
+                )
 
         journal.active = True
         journal.validated_by = user
@@ -405,6 +435,5 @@ class JournalPublicViewSet(
     ordering_fields = [
         "title",
         "issn",
-        "start_period",
-        "finish_period",
+        "publication_date",
     ]
