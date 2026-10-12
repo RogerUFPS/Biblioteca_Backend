@@ -101,6 +101,10 @@ class JournalServicesTests(TestCase):
 
         self.assertIsNotNone(journal.pk)
 
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
+
         self.assertEqual(
             journal.issn,
             "1234-5678",

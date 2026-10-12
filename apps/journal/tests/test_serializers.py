@@ -113,6 +113,30 @@ class JournalSerializersTests(TestCase):
     # CREACIÓN Y NORMALIZACIÓN
     # ==========================================================================
 
+    def test_publication_fields_are_read_only(self):
+        serializer = serializers.JournalSerializer()
+
+        for field_name in ("active", "validated_by", "validated_at"):
+            self.assertTrue(serializer.fields[field_name].read_only)
+
+    def test_create_ignores_client_controlled_publication_fields(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "1010-2020",
+                "title": "Journal pendiente",
+                "active": True,
+                "validated_by": self.system.pk,
+                "validated_at": timezone.now().isoformat(),
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
+
     def test_journal_serializer_create_with_all_relations(self):
         """
         Crea una revista y sincroniza las seis relaciones configuradas.

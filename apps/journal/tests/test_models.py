@@ -82,7 +82,9 @@ class JournalModelsTests(TestCase):
         self.assertIsNotNone(journal.pk)
         self.assertEqual(journal.issn, "1234-5678")
         self.assertEqual(journal.title, "Revista de Ingeniería")
-        self.assertTrue(journal.active)
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
 
     def test_journal_issn_case_insensitive_unique_constraint(self):
         """El ISSN debe ser único sin importar mayúsculas/minúsculas."""
