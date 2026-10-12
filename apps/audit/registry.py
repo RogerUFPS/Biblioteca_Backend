@@ -87,7 +87,7 @@ def register_auditlog_models():
         (Harvest, {}),
 
         # Usuarios (se excluye la contraseña por seguridad)
-        (User, {"exclude_fields": ["password"]}),
+        (User, {"exclude_fields": ["password", "session_key"]}),
     ]
 
     for model, kwargs in models_config:

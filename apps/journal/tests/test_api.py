@@ -23,6 +23,7 @@ class JournalAPITests(APITestCase):
             code=0,
             full_name="Sistema",
             email="sistema@test.local",
+            is_superadmin=True,
         )
 
         cls.editorial = Editorial.objects.create(
@@ -71,6 +72,9 @@ class JournalAPITests(APITestCase):
             status=Platform.Status.PUBLICADO,
             created_by=cls.system,
         )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.system)
 
     def _get_data(
         self,

@@ -26,6 +26,7 @@ class PlatformAPITests(APITestCase):
             code=0,
             full_name="Sistema",
             email="sistema@test.local",
+            is_superadmin=True,
         )
 
         cls.institution = Institution.objects.create(
@@ -68,6 +69,9 @@ class PlatformAPITests(APITestCase):
             fields={"title": "ti"},
             created_by=cls.system,
         )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.system)
 
     def _get_data(self, response: Any) -> dict[str, Any]:
         """Helper para obtener el payload asegurando el tipado estático."""

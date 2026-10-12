@@ -10,6 +10,7 @@ from apps.catalog.models import (
     KnowledgeArea,
     Language,
     MaterialType,
+    SharedAcademicProgramKnowledgeArea,
 )
 from apps.core.serializers import (
     RelationConfig,
@@ -240,6 +241,13 @@ class JournalPlatformRelationSerializer(
             attrs.get("start_period"),
             attrs.get("finish_period"),
         )
+
+        platform = attrs.get("platform")
+        if platform:
+            validate_platform_for_journal_association(
+                platform,
+                field_name="platform",
+            )
 
         return attrs
 

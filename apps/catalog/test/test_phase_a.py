@@ -20,10 +20,12 @@ class PhaseATests(TestCase):
             code=0,
             full_name="Sistema",
             email="sistema@test.local",
+            is_superadmin=True,
         )
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=self.system)
 
     def test_catalog_create_uses_system_user(self):
         response = self.client.post(
