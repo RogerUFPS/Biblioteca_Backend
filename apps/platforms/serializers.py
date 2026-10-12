@@ -206,6 +206,25 @@ class LinkCheckLogSerializer(
         read_only_fields = AUDIT_FIELDS
 
 
+class PlatformLinkCheckResultSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=("platform", "journal"))
+    journal = serializers.IntegerField(allow_null=True)
+    journal_platform = serializers.IntegerField(allow_null=True)
+    url = serializers.URLField(allow_null=True)
+    is_active = serializers.BooleanField()
+    http_status_code = serializers.IntegerField(allow_null=True)
+    last_check = serializers.DateTimeField(allow_null=True)
+    error = serializers.CharField(required=False)
+
+
+class PlatformLinksCheckResponseSerializer(serializers.Serializer):
+    platform = serializers.IntegerField()
+    checked = serializers.IntegerField()
+    available = serializers.IntegerField()
+    failed = serializers.IntegerField()
+    results = PlatformLinkCheckResultSerializer(many=True)
+
+
 class PlatformSerializer(
     SoftDeleteRelationSyncMixin,
     ArchivedNameMixin,
@@ -378,6 +397,11 @@ class PlatformSerializer(
         academic_programs.
         """
         attrs = super().validate(attrs)
+
+        if self.instance is None and not attrs.get("public_url"):
+            raise serializers.ValidationError({
+                "public_url": "La URL pública es obligatoria al crear una plataforma."
+            })
 
         instance = self.instance
 

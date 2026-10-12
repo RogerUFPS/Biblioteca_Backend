@@ -477,6 +477,7 @@ def _get_next_fail_count(
     *,
     url: str,
     is_active: bool,
+    journal_platform=None,
 ) -> int:
     """
     Calcula la cantidad de fallos consecutivos para una URL específica.
@@ -492,7 +493,7 @@ def _get_next_fail_count(
         models.LinkCheckLog.objects
         .filter(
             platform=platform,
-            journal_platform__isnull=True,
+            journal_platform=journal_platform,
             url=url,
         )
         .order_by(*LINK_LOG_ORDERING)
@@ -686,59 +687,46 @@ def check_platform_link(
             )
         })
 
-    if url is None or not str(url).strip():
-        latest_log = (
-            models.LinkCheckLog.objects
-            .filter(
-                platform=platform_snapshot,
-                journal_platform__isnull=True,
-            )
-            .order_by(*LINK_LOG_ORDERING)
-            .first()
+    if url is not None and str(url).strip():
+        register_link_url(
+            platform=platform_snapshot,
+            url=str(url).strip(),
+            user=user,
         )
+    return check_link_context(platform=platform_snapshot, user=user)
 
-        if latest_log is None:
-            raise ValidationError({
-                "url": (
-                    "La plataforma no tiene una URL pública registrada "
-                    "en el historial de verificación de enlaces."
-                )
-            })
 
-        resolved_url: str = latest_log.url.strip()
+def check_link_context(
+    *,
+    platform: models.Platform,
+    user,
+    journal_platform=None,
+) -> models.LinkCheckLog:
+    """Verifica la URL vigente de un contexto Platform o Journal-Platform."""
+    if platform.is_deleted:
+        raise ValidationError({"detail": "No se puede verificar una plataforma eliminada."})
+    if journal_platform is None:
+        latest_log = latest_platform_link_log(platform)
     else:
-        resolved_url = url.strip()
+        if journal_platform.is_deleted or journal_platform.platform_id != platform.pk:
+            raise ValidationError({"journal_platform": "La relación no está vigente."})
+        latest_log = latest_journal_link_log(journal_platform)
+    if latest_log is None:
+        raise ValidationError({"url": "No existe una URL vigente para este contexto."})
 
+    resolved_url = latest_log.url.strip()
     _validate_safe_http_url(resolved_url)
-
-    status_code, is_active = _perform_link_check(
-        resolved_url
-    )
-
+    status_code, is_active = _perform_link_check(resolved_url)
     with transaction.atomic():
-        current_platform = (
-            models.Platform.all_objects
-            .select_for_update()
-            .get(pk=platform.pk)
-        )
-
-        if current_platform.is_deleted:
-            raise ValidationError({
-                "detail": (
-                    "La plataforma fue eliminada durante "
-                    "la verificación del enlace."
-                )
-            })
-
         fail_count = _get_next_fail_count(
-            current_platform,
+            platform,
             url=resolved_url,
             is_active=is_active,
+            journal_platform=journal_platform,
         )
-
-        link_log = models.LinkCheckLog.objects.create(
-            platform=current_platform,
-            journal_platform=None,
+        return models.LinkCheckLog.objects.create(
+            platform=platform,
+            journal_platform=journal_platform,
             url=resolved_url,
             fail_count=fail_count,
             http_status_code=status_code,
@@ -747,4 +735,55 @@ def check_platform_link(
             created_by=user,
         )
 
-    return link_log
+
+def check_platform_links(*, platform: models.Platform, user) -> dict:
+    """Verifica secuencialmente todas las URLs vigentes de una Platform."""
+    if platform.is_deleted:
+        raise ValidationError({"detail": "No se puede verificar una plataforma eliminada."})
+    contexts = [("platform", None)]
+    contexts.extend(
+        ("journal", link)
+        for link in platform.journal_links.filter(journal__deleted_at__isnull=True)
+    )
+    results = []
+    for context_type, journal_platform in contexts:
+        try:
+            log = check_link_context(
+                platform=platform,
+                journal_platform=journal_platform,
+                user=user,
+            )
+            result = {
+                "type": context_type,
+                "journal": getattr(journal_platform, "journal_id", None),
+                "journal_platform": getattr(journal_platform, "pk", None),
+                **models_to_link_result(log),
+            }
+        except Exception as exc:
+            result = {
+                "type": context_type,
+                "journal": getattr(journal_platform, "journal_id", None),
+                "journal_platform": getattr(journal_platform, "pk", None),
+                "url": None,
+                "is_active": False,
+                "http_status_code": None,
+                "last_check": None,
+                "error": str(exc),
+            }
+        results.append(result)
+    return {
+        "platform": platform.pk,
+        "checked": len(results),
+        "available": sum(item["is_active"] for item in results),
+        "failed": sum(not item["is_active"] for item in results),
+        "results": results,
+    }
+
+
+def models_to_link_result(log: models.LinkCheckLog) -> dict:
+    return {
+        "url": log.url,
+        "is_active": log.is_active,
+        "http_status_code": log.http_status_code,
+        "last_check": log.last_check,
+    }
