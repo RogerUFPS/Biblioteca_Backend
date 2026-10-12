@@ -232,7 +232,13 @@ lógicamente. No se exige que esté `PUBLICADO`.
 | POST | `/api/journals/{id}/publish/` | Activar y validar revista | 200 |
 | POST | `/api/journals/{id}/deactivate/` | Marcar revista como inactiva | 200 |
 
-`active`, `validated_by` y `validated_at` no se modifican directamente desde el serializer administrativo.
+`active`, `validated_by` y `validated_at` son campos de solo lectura en el
+serializer administrativo. El cliente puede consultarlos, pero no controlarlos
+mediante `POST`, `PUT` o `PATCH`.
+
+Crear una revista, manualmente o mediante harvesting, siempre la deja pendiente
+de publicación: `active=false`, `validated_by=null` y `validated_at=null`. La
+única operación que la publica es `POST /api/journals/{id}/publish/`.
 
 Una actualización de la ficha limpia la validación previa. Por tanto, una revista modificada debe publicarse nuevamente antes de regresar a la consulta pública.
 
@@ -248,6 +254,7 @@ Para aparecer en la consulta pública una revista debe cumplir simultáneamente:
 ```text
 active = True
 validated_at != null
+deleted_at = null
 ```
 
 Las revistas eliminadas lógicamente tampoco aparecen.
@@ -273,7 +280,9 @@ curl -X POST http://localhost:8000/api/journals/ \
   }'
 ```
 
-El ISSN se almacena normalizado como `1476-4687`.
+El ISSN se almacena normalizado como `1476-4687`. La revista se crea pendiente:
+`active=false`, `validated_by=null` y `validated_at=null`, aunque el cliente
+intente enviar valores diferentes para esos campos de solo lectura.
 
 La respuesta incluye las `knowledge_areas` derivadas automáticamente de `academic_programs`.
 
@@ -351,7 +360,10 @@ validated_at = fecha actual
 curl -X POST http://localhost:8000/api/journals/1/deactivate/
 ```
 
-La revista deja de aparecer en la consulta pública.
+La revista queda con `active=false` y deja de aparecer en la consulta pública.
+La acción conserva `validated_by` y `validated_at` como historial de su última
+validación. Una llamada posterior a `/publish/` actualiza nuevamente esos datos
+y puede volver a publicarla.
 
 ### 6.8. Listar revistas públicas
 
