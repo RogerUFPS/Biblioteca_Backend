@@ -515,7 +515,10 @@ def create_journal(
     exclusivamente de ``academic_program_ids``.
 
     Este servicio está diseñado como punto de entrada interno para
-    los procesos de cosecha y otros procesos backend.
+    los procesos de cosecha y otros procesos backend. ``active`` permanece en
+    la firma por compatibilidad, pero no modifica el estado de publicación:
+    toda creación o actualización queda pendiente de la acción explícita de
+    publicación.
     """
 
     normalized_issn = _normalize_issn(
@@ -564,6 +567,7 @@ def create_journal(
             "issn": normalized_issn,
             "title": normalized_title,
             "created_by": user,
+            "active": False,
         }
 
         if editorial_id is not None:
@@ -577,9 +581,6 @@ def create_journal(
 
         if has_apc is not None:
             create_data["has_apc"] = has_apc
-
-        if active is not None:
-            create_data["active"] = active
 
         if start_period is not None:
             create_data["start_period"] = start_period
@@ -673,12 +674,6 @@ def create_journal(
             journal.has_apc = has_apc
             update_fields.append(
                 "has_apc"
-            )
-
-        if active is not None:
-            journal.active = active
-            update_fields.append(
-                "active"
             )
 
         if start_period is not None:

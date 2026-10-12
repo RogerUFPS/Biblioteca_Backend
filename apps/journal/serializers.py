@@ -595,6 +595,11 @@ class JournalSerializer(
             validated_data
         )
 
+        # Crear o restaurar una revista nunca equivale a publicarla.
+        validated_data["active"] = False
+        validated_data["validated_by"] = None
+        validated_data["validated_at"] = None
+
         journal = super().create(
             validated_data
         )

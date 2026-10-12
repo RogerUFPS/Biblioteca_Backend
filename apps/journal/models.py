@@ -61,7 +61,7 @@ class Journal(AuditableModel):
     )
 
     active = models.BooleanField(
-        default=True,
+        default=False,
         help_text="Indica si la revista se encuentra actualmente activa.",
     )
 
