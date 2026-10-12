@@ -341,3 +341,9 @@ Las reglas principales verificadas son:
 - Documentación de la API mediante Swagger/OpenAPI.
 
 **Cobertura documentada: 47 pruebas para la Fase A de `platforms`.**
+## Fase estructural: URLs obligatorias y chequeo por Platform
+
+La creación administrativa exige `public_url` y comprueba que su registro sea
+atómico mediante `LinkCheckLog`. El endpoint `check-links` cubre la URL general
+y las URLs contextuales vigentes, ignora relaciones eliminadas y conserva los
+resultados independientes ante fallos parciales.

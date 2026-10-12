@@ -618,3 +618,21 @@ esta invalidación.
 Ejemplo de creación/edición: se envían los metadatos y relaciones no académicas
 (`institutions`, `languages`, `countries`, `material_types`), pero se omiten
 `academic_programs` y `knowledge_areas`.
+## Contrato de URLs y verificación vigente
+
+- `public_url` es obligatoria al crear una Platform, pero no es una columna del
+  modelo: se registra como `LinkCheckLog` general (`journal_platform=null`).
+- Registrar una URL no equivale a verificarla; `last_check=null` significa que
+  todavía no se ha realizado una comprobación HTTP.
+- `POST /api/platforms/{id}/check-link/` verifica la URL pública vigente.
+- `POST /api/platforms/{id}/check-links/` verifica secuencialmente la URL pública
+  y la URL vigente de cada relación Journal-Platform no eliminada. Un fallo
+  individual no detiene las demás comprobaciones.
+- El historial conserva únicamente resultados; el chequeo masivo no recorre
+  URLs históricas ni relaciones eliminadas.
+
+Pendiente: implementar el chequeo global del sistema mediante un job asíncrono.
+No se implementa un recorrido global síncrono.
+
+También continúa pendiente cualquier regla adicional para derivar o sincronizar
+idiomas de Platform; esta fase no modifica ese comportamiento.
