@@ -124,9 +124,12 @@ class JournalAPITests(APITestCase):
                 "issn": "1476 4687",
                 "title": "Nature",
                 "editorial": self.editorial.pk,
-                "license": "CC BY",
+                "publication_date": "1869-11-04",
                 "has_apc": False,
-                "start_period": "1869-01-01",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/nature",
+                }],
             },
             format="json",
         )
@@ -171,6 +174,10 @@ class JournalAPITests(APITestCase):
                 "active": True,
                 "validated_by": self.system.pk,
                 "validated_at": "2026-10-09T12:00:00Z",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/unpublished",
+                }],
             },
             format="json",
         )
@@ -208,6 +215,10 @@ class JournalAPITests(APITestCase):
                 "title": "Nature Derived",
                 "academic_programs": [self.academic_program.pk],
                 "knowledge_areas": [999999],
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/nature-derived",
+                }],
             },
             format="json",
         )
@@ -233,7 +244,10 @@ class JournalAPITests(APITestCase):
                 "issn": "1476-4689",
                 "title": "Journal Draft Platform",
                 "platforms": [
-                    {"platform": draft_platform.pk}
+                    {
+                        "platform": draft_platform.pk,
+                        "journal_url": "https://8.8.8.8/draft-journal",
+                    }
                 ],
             },
             format="json",
