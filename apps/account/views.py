@@ -1,4 +1,5 @@
 import secrets
+from html import escape
 
 from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
 from django.contrib.sessions.backends.db import SessionStore
@@ -179,8 +180,9 @@ class ForgotPasswordView(APIView):
                 user.email,
                 "Recuperación de contraseña",
                 (
-                    f"Tu contraseña provisional es: {password}\n"
-                    "Inicia sesión y cámbiala antes de continuar."
+                    "<p>Tu contraseña provisional es:</p>"
+                    f"<p><strong>{escape(password)}</strong></p>"
+                    "<p>Inicia sesión y cámbiala antes de continuar.</p>"
                 ),
             )
         except EmailDeliveryError as error:
@@ -273,9 +275,10 @@ class InviteView(APIView):
                     user.email,
                     "Invitación al sistema de revistas",
                     (
-                        f"Tu correo de acceso es: {user.email}\n"
-                        f"Tu contraseña provisional es: {password}\n"
-                        "Inicia sesión y cámbiala antes de continuar."
+                        f"<p>Tu correo de acceso es: {escape(user.email)}</p>"
+                        "<p>Tu contraseña provisional es:</p>"
+                        f"<p><strong>{escape(password)}</strong></p>"
+                        "<p>Inicia sesión y cámbiala antes de continuar.</p>"
                     ),
                 )
             except EmailDeliveryError as error:
