@@ -153,6 +153,7 @@ asociaciones se administran mediante el catálogo de licencias.
 | --- | --- | --- | --- |
 | `GET` | `/` | Ninguno. Acepta filtros, búsqueda y paginación. | `200`: lista paginada de Harvest. |
 | `GET` | `/{id}/` | Ninguno. | `200`: detalle del Harvest. |
+| `GET` | `/{id}/journals/` | Ninguno. Acepta paginación. | `200`: revistas nuevas agregadas por ese Harvest. |
 | `POST` | `/{id}/pause/` | Ninguno. | `200`: pausado; `202`: pausa solicitada mientras termina la página actual; `400`: estado incompatible. |
 | `POST` | `/{id}/resume/` | Ninguno. | `200`: Harvest reanudado; `400`: no estaba pausado; `500`: error al reanudar. |
 
@@ -173,6 +174,12 @@ Filtros para `GET /harvests/`:
 El serializer de Harvest incluye `platform`, `platform_name`, `schedule`,
 `event`, `schedule_frequency`, límites, `api_cursor`, estado, contadores,
 tiempos, `duration` y `error_message`. Todos sus campos son de solo lectura.
+
+`GET /harvests/{id}/journals/` entrega una lista paginada con la representación
+administrativa de Journal para cada registro cuyo resultado fue `added`.
+Registros que se actualizaron en esa ejecución no se incluyen. La relación se
+registra desde que esta función se despliega; cosechas históricas no tienen
+detalle de revistas asociado. Responde `404` si no existe el Harvest.
 
 La pausa de una cosecha en ejecución es cooperativa: responde `202 Accepted`
 con estado `pausing` y termina de procesar la página OpenAlex en curso antes de

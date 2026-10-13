@@ -6,7 +6,7 @@ import httpx
 
 from apps.account.models import User
 from apps.catalog.models import Country
-from apps.harvesting.models import Harvest, Schedule, ScheduleEvent
+from apps.harvesting.models import Harvest, HarvestJournal, Schedule, ScheduleEvent
 from apps.harvesting.services import (
     OpenAlexHarvester,
     _next_occurrence,
@@ -137,6 +137,13 @@ class HarvestingServicesTestCase(TestCase):
         self.assertFalse(j1.license_links.exists())
         self.assertTrue(j1.country_links.filter(country=country).exists())
         self.assertTrue(journal_platform)
+        self.assertTrue(
+            HarvestJournal.objects.filter(
+                harvest=harvest,
+                journal=j1,
+                result=HarvestJournal.Result.ADDED,
+            ).exists()
+        )
 
         # Probar deduplicación: Segunda cosecha con los mismos datos
         mock_response_dup = MagicMock(spec=httpx.Response)
@@ -173,6 +180,13 @@ class HarvestingServicesTestCase(TestCase):
         self.assertEqual(harvest_2.records_added, 0)
         self.assertEqual(harvest_2.records_updated, 1)
         self.assertEqual(harvest_2.api_cursor, "cursor_page_2")
+        self.assertTrue(
+            HarvestJournal.objects.filter(
+                harvest=harvest_2,
+                journal=j1,
+                result=HarvestJournal.Result.UPDATED,
+            ).exists()
+        )
 
         # No se duplicó el registro en la BD
         self.assertEqual(Journal.objects.filter(issn="1111-1111").count(), 1)

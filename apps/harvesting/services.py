@@ -347,18 +347,28 @@ class OpenAlexHarvester:
         is_existing = Journal.all_objects.filter(issn__iexact=formatted_issn).exists()
 
         try:
-            create_journal(
-                issn=issn,
-                title=title,
-                user=self.user,
-                platform_id=harvest.platform_id,
-                journal_url=journal_url,
-                editorial_id=editorial_id,
-                url_image=url_image,
-                has_apc=has_apc,
-                country_ids=country_ids,
-                has_full_text=has_full_text,
-            )
+            with transaction.atomic():
+                journal = create_journal(
+                    issn=issn,
+                    title=title,
+                    user=self.user,
+                    platform_id=harvest.platform_id,
+                    journal_url=journal_url,
+                    editorial_id=editorial_id,
+                    url_image=url_image,
+                    has_apc=has_apc,
+                    country_ids=country_ids,
+                    has_full_text=has_full_text,
+                )
+                models.HarvestJournal.objects.create(
+                    harvest=harvest,
+                    journal=journal,
+                    result=(
+                        models.HarvestJournal.Result.UPDATED
+                        if is_existing
+                        else models.HarvestJournal.Result.ADDED
+                    ),
+                )
             if is_existing:
                 harvest.records_updated += 1
             else:
