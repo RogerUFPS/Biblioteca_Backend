@@ -20,10 +20,12 @@ class PhaseATests(TestCase):
             code=0,
             full_name="Sistema",
             email="sistema@test.local",
+            is_superadmin=True,
         )
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=self.system)
 
     def test_catalog_create_uses_system_user(self):
         response = self.client.post(
@@ -227,7 +229,7 @@ class PhaseATests(TestCase):
         response = self.client.get("/api/catalog/editorials/archived/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["total_items"], 1)
         self.assertEqual(response.data["results"][0]["id"], archived.pk)
         self.assertIsNotNone(response.data["results"][0]["deleted_at"])
 

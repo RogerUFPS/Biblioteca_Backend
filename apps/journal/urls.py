@@ -12,6 +12,12 @@ router.register(
 )
 
 router.register(
+    "licenses",
+    views.LicenseViewSet,
+    basename="journal-license",
+)
+
+router.register(
     "",
     views.JournalViewSet,
     basename="journal",

@@ -54,23 +54,13 @@ class JournalPublicFilter(django_filters.FilterSet):
         field_name="has_apc",
     )
 
-    start_period_from = django_filters.DateFilter(
-        field_name="start_period",
+    publication_date_from = django_filters.DateFilter(
+        field_name="publication_date",
         lookup_expr="gte",
     )
 
-    start_period_to = django_filters.DateFilter(
-        field_name="start_period",
-        lookup_expr="lte",
-    )
-
-    finish_period_from = django_filters.DateFilter(
-        field_name="finish_period",
-        lookup_expr="gte",
-    )
-
-    finish_period_to = django_filters.DateFilter(
-        field_name="finish_period",
+    publication_date_to = django_filters.DateFilter(
+        field_name="publication_date",
         lookup_expr="lte",
     )
 

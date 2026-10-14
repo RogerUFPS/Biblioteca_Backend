@@ -3,7 +3,12 @@ import logging
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+<<<<<<< HEAD
 from drf_spectacular.utils import extend_schema, extend_schema_view
+=======
+from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
+from rest_framework import serializers as drf_serializers
+>>>>>>> production
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -38,6 +43,29 @@ logger = logging.getLogger(__name__)
     ),
     destroy=extend_schema(
         summary="Desactivar programación de cosecha",
+<<<<<<< HEAD
+=======
+        description=(
+            "No necesita cuerpo si la programación puede eliminarse "
+            "permanentemente. Si tiene registros dependientes, se debe enviar "
+            "`delete_explanation` para archivarla."
+        ),
+        request=inline_serializer(
+            name="ScheduleDeleteRequest",
+            fields={
+                "delete_explanation": drf_serializers.CharField(
+                    required=False,
+                    allow_blank=False,
+                    max_length=500,
+                ),
+            },
+        ),
+        tags=["Cosecha - Programaciones"],
+    ),
+    restore=extend_schema(
+        summary="Restaurar programación de cosecha",
+        request=None,
+>>>>>>> production
         tags=["Cosecha - Programaciones"],
     ),
 )
@@ -49,6 +77,24 @@ class ScheduleViewSet(AuditableViewSet):
     ordering_fields = ["created_at", "start_date"]
     ordering = ["-created_at"]
 
+<<<<<<< HEAD
+=======
+    @extend_schema(
+        summary="Procesar cosechas programadas vencidas",
+        description=(
+            "Evalúa las programaciones vencidas y ejecuta las cosechas "
+            "correspondientes."
+        ),
+        request=None,
+        responses={200: serializers.HarvestSerializer(many=True)},
+        tags=["Cosecha - Programaciones"],
+    )
+    @action(detail=False, methods=["post"], url_path="run-due")
+    def run_due(self, request):
+        harvests = services.run_scheduled_harvests()
+        return Response(serializers.HarvestSerializer(harvests, many=True).data)
+
+>>>>>>> production
 
 class ScheduleEventViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = models.ScheduleEvent.objects.select_related("schedule").prefetch_related(
@@ -78,6 +124,10 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
             "Solicita detener la cosecha al terminar la página de OpenAlex que "
             "está procesando. Una cosecha pendiente se pausa inmediatamente."
         ),
+<<<<<<< HEAD
+=======
+        request=None,
+>>>>>>> production
         responses={200: serializers.HarvestSerializer, 202: serializers.HarvestSerializer},
         tags=["Cosecha - Ejecuciones"],
     )
@@ -85,7 +135,11 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
     def pause(self, request, pk=None):
         with transaction.atomic():
             harvest = get_object_or_404(
+<<<<<<< HEAD
                 self.get_queryset().select_for_update(),
+=======
+                self.get_queryset().select_for_update(of=("self",)),
+>>>>>>> production
                 pk=pk,
             )
             if harvest.state == models.Harvest.State.PENDING:
@@ -111,6 +165,10 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         summary="Reanudar una cosecha pausada",
         description="Continúa la recolección desde el cursor guardado en el Harvest.",
+<<<<<<< HEAD
+=======
+        request=None,
+>>>>>>> production
         responses={200: serializers.HarvestSerializer, 500: serializers.HarvestSerializer},
         tags=["Cosecha - Ejecuciones"],
     )
@@ -118,7 +176,11 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
     def resume(self, request, pk=None):
         with transaction.atomic():
             harvest = get_object_or_404(
+<<<<<<< HEAD
                 self.get_queryset().select_for_update(),
+=======
+                self.get_queryset().select_for_update(of=("self",)),
+>>>>>>> production
                 pk=pk,
             )
             if harvest.state != models.Harvest.State.PAUSED:

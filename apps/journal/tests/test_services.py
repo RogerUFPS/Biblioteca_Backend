@@ -13,8 +13,30 @@ from apps.catalog.models import (
     MaterialType,
     SharedAcademicProgramKnowledgeArea,
 )
-from apps.journal import models, services
+from apps.journal import models, services as journal_services
 from apps.platforms.models import Platform
+
+
+class _JournalServicesTestAdapter:
+    """Adapta casos históricos al contrato contextual de create_journal."""
+
+    @staticmethod
+    def create_journal(**kwargs):
+        kwargs.pop("license", None)
+        kwargs.pop("active", None)
+        start_period = kwargs.pop("start_period", None)
+        finish_period = kwargs.pop("finish_period", None)
+        if start_period is not None:
+            kwargs.setdefault("platform_start_period", start_period)
+        if finish_period is not None:
+            kwargs.setdefault("platform_finish_period", finish_period)
+        kwargs.setdefault("platform_id", Platform.objects.first().pk)
+        compact_issn = str(kwargs.get("issn", "journal")).replace("-", "")
+        kwargs.setdefault("journal_url", f"https://8.8.8.8/{compact_issn}")
+        return journal_services.create_journal(**kwargs)
+
+
+services = _JournalServicesTestAdapter()
 
 
 class JournalServicesTests(TestCase):
@@ -68,6 +90,7 @@ class JournalServicesTests(TestCase):
 
         cls.platform = Platform.objects.create(
             name="Scopus Test",
+            is_harvestable=True,
             base_api_url="https://api.scopus.test",
             status=Platform.Status.PUBLICADO,
             created_by=cls.system,
@@ -99,6 +122,10 @@ class JournalServicesTests(TestCase):
         )
 
         self.assertIsNotNone(journal.pk)
+
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
 
         self.assertEqual(
             journal.issn,
@@ -232,11 +259,6 @@ class JournalServicesTests(TestCase):
     "Journal Actualizado",
 )
 
-        self.assertEqual(
-            updated.license,
-            "CC BY",
-        )
-
     # ==========================================================================
     # RESTAURACIÓN
     # ==========================================================================
@@ -319,6 +341,10 @@ class JournalServicesTests(TestCase):
 
         self.assertIsNone(
             restored.validated_at
+        )
+
+        self.assertFalse(
+            restored.active
         )
 
     # ==========================================================================
@@ -553,7 +579,7 @@ class JournalServicesTests(TestCase):
             )
 
         self.assertIn(
-            "finish_period",
+            "platform_finish_period",
             context.exception.detail,
         )
 
@@ -662,6 +688,12 @@ class JournalServicesTests(TestCase):
             user=self.system,
             explanation="Eliminada para prueba",
         )
+        self.platform.status = Platform.Status.BORRADOR
+        self.platform.validated_by = None
+        self.platform.validated_at = None
+        self.platform.save(
+            update_fields=["status", "validated_by", "validated_at"]
+        )
 
         services.create_journal(
             issn="4455-6677",
@@ -692,6 +724,8 @@ class JournalServicesTests(TestCase):
         self.assertTrue(
             link.has_full_text
         )
+        self.platform.refresh_from_db()
+        self.assertEqual(self.platform.status, Platform.Status.BORRADOR)
 
     def test_source_platform_rejects_invalid_period(self):
         """
@@ -729,13 +763,18 @@ class JournalServicesTests(TestCase):
             context.exception.detail,
         )
 
+<<<<<<< HEAD
     def test_source_platform_rejects_draft_platform(self):
+=======
+    def test_source_platform_allows_draft_platform(self):
+>>>>>>> production
         draft_platform = Platform.objects.create(
             name="Draft Source Platform",
             status=Platform.Status.BORRADOR,
             created_by=self.system,
         )
 
+<<<<<<< HEAD
         with self.assertRaises(ValidationError) as context:
             services.create_journal(
                 issn="7070-1212",
@@ -747,12 +786,34 @@ class JournalServicesTests(TestCase):
         self.assertIn("platform_id", context.exception.detail)
 
     def test_source_platform_rejects_obsolete_platform(self):
+=======
+        journal = services.create_journal(
+            issn="7070-1212",
+            title="Journal Draft Platform",
+            platform_id=draft_platform.pk,
+            user=self.system,
+        )
+
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform=draft_platform,
+            ).exists()
+        )
+        draft_platform.refresh_from_db()
+        self.assertEqual(draft_platform.status, Platform.Status.BORRADOR)
+        self.assertIsNone(draft_platform.validated_by)
+        self.assertIsNone(draft_platform.validated_at)
+
+    def test_source_platform_allows_obsolete_platform(self):
+>>>>>>> production
         obsolete_platform = Platform.objects.create(
             name="Obsolete Source Platform",
             status=Platform.Status.OBSOLETO,
             created_by=self.system,
         )
 
+<<<<<<< HEAD
         with self.assertRaises(ValidationError) as context:
             services.create_journal(
                 issn="7171-2323",
@@ -762,3 +823,40 @@ class JournalServicesTests(TestCase):
             )
 
         self.assertIn("platform_id", context.exception.detail)
+=======
+        journal = services.create_journal(
+            issn="7171-2323",
+            title="Journal Obsolete Platform",
+            platform_id=obsolete_platform.pk,
+            user=self.system,
+        )
+
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform=obsolete_platform,
+            ).exists()
+        )
+        obsolete_platform.refresh_from_db()
+        self.assertEqual(obsolete_platform.status, Platform.Status.OBSOLETO)
+
+    def test_source_platform_rejects_soft_deleted_platform(self):
+        deleted_platform = Platform.objects.create(
+            name="Deleted Source Platform",
+            created_by=self.system,
+        )
+        deleted_platform.soft_delete(
+            user=self.system,
+            explanation="Eliminada para prueba",
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            services.create_journal(
+                issn="7272-3434",
+                title="Journal Deleted Platform",
+                platform_id=deleted_platform.pk,
+                user=self.system,
+            )
+
+        self.assertIn("platform_id", context.exception.detail)
+>>>>>>> production

@@ -1,6 +1,9 @@
+from django.db.models import F, Prefetch
 from django.utils import timezone
 
 from drf_spectacular.utils import (
+    OpenApiParameter,
+    OpenApiTypes,
     extend_schema,
     extend_schema_view,
     inline_serializer,
@@ -15,8 +18,23 @@ from apps.core.viewsets import (
     AuditableViewSet,
     get_acting_user,
 )
+from apps.core.pagination import CustomPageNumberPagination
 
 from . import filters, models, serializers, services
+
+
+def _with_public_link_logs(queryset):
+    return queryset.prefetch_related(
+        Prefetch(
+            "link_check_logs",
+            queryset=(
+                models.LinkCheckLog.objects
+                .filter(journal_platform__isnull=True)
+                .order_by(*services.LINK_LOG_ORDERING)
+            ),
+            to_attr="_public_link_logs",
+        )
+    )
 
 
 # ==============================================================================
@@ -130,8 +148,23 @@ class ValidSintaxisViewSet(AuditableViewSet):
         summary="Listar verificaciones de enlaces",
         description=(
             "Obtiene el historial de verificaciones realizadas sobre "
-            "los enlaces de las plataformas."
+            "los enlaces de las plataformas. Por defecto muestra primero "
+            "las verificaciones más recientes y deja al final los registros "
+            "todavía no verificados. Use journal_platform__isnull=true para "
+            "consultar únicamente URLs públicas generales."
         ),
+        parameters=[
+            OpenApiParameter(
+                name="page_size",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Cantidad de registros por página. Valor predeterminado: "
+                    "10; máximo permitido: 100."
+                ),
+            ),
+        ],
         tags=["Plataformas - Verificación de enlaces"],
     ),
     retrieve=extend_schema(
@@ -147,13 +180,19 @@ class LinkCheckLogViewSet(viewsets.ReadOnlyModelViewSet):
     Consulta de solo lectura del historial de verificaciones de enlaces.
     """
 
-    queryset = models.LinkCheckLog.objects.all()
+    queryset = models.LinkCheckLog.objects.order_by(
+        F("last_check").desc(nulls_last=True),
+        "-created_at",
+        "-pk",
+    )
     serializer_class = serializers.LinkCheckLogSerializer
+    pagination_class = CustomPageNumberPagination
 
-    filterset_fields = [
-        "platform",
-        "is_active",
-    ]
+    filterset_fields = {
+        "platform": ["exact"],
+        "journal_platform": ["exact", "isnull"],
+        "is_active": ["exact"],
+    }
 
     ordering_fields = [
         "last_check",
@@ -253,7 +292,7 @@ class PlatformViewSet(AuditableViewSet):
     CRUD y ciclo de vida administrativo de plataformas.
     """
 
-    queryset = models.Platform.objects.all()
+    queryset = _with_public_link_logs(models.Platform.objects.all())
     serializer_class = serializers.PlatformSerializer
 
     search_fields = [
@@ -262,6 +301,7 @@ class PlatformViewSet(AuditableViewSet):
 
     filterset_fields = [
         "status",
+        "is_harvestable",
         "requires_registration",
         "has_access_text",
         "valid_sintaxis",
@@ -426,6 +466,21 @@ class PlatformViewSet(AuditableViewSet):
         )
 
     @extend_schema(
+        summary="Verificar todos los enlaces vigentes de una plataforma",
+        request=None,
+        responses={200: serializers.PlatformLinksCheckResponseSerializer},
+        tags=["Plataformas - Verificación de enlaces"],
+    )
+    @action(detail=True, methods=["post"], url_path="check-links")
+    def check_links(self, request, pk=None):
+        result = services.check_platform_links(
+            platform=self.get_object(),
+            user=get_acting_user(request),
+        )
+        data = serializers.PlatformLinksCheckResponseSerializer(result).data
+        return Response(data, status=status.HTTP_200_OK)
+
+    @extend_schema(
         summary="Restaurar plataforma eliminada",
         description=(
             "Restaura una plataforma eliminada mediante Soft Delete. "
@@ -519,9 +574,11 @@ class PlatformPublicViewSet(
     Exploración pública de plataformas publicadas y no eliminadas.
     """
 
-    queryset = models.Platform.objects.filter(
-        status=models.Platform.Status.PUBLICADO,
-    ).distinct()
+    queryset = _with_public_link_logs(
+        models.Platform.objects.filter(
+            status=models.Platform.Status.PUBLICADO,
+        ).distinct()
+    )
 
     serializer_class = serializers.PlatformPublicSerializer
 

@@ -1,6 +1,8 @@
 from datetime import date
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.account.models import User
 from apps.catalog.models import (
@@ -13,7 +15,7 @@ from apps.catalog.models import (
     SharedAcademicProgramKnowledgeArea,
 )
 from apps.journal import models, serializers
-from apps.platforms.models import Platform
+from apps.platforms.models import LinkCheckLog, Platform
 
 
 class JournalSerializersTests(TestCase):
@@ -88,6 +90,7 @@ class JournalSerializersTests(TestCase):
 
         cls.platform = Platform.objects.create(
             name="Scopus Test",
+            is_harvestable=True,
             base_api_url="https://api.scopus.test",
             status=Platform.Status.PUBLICADO,
             created_by=cls.system,
@@ -110,6 +113,34 @@ class JournalSerializersTests(TestCase):
     # CREACIÓN Y NORMALIZACIÓN
     # ==========================================================================
 
+    def test_publication_fields_are_read_only(self):
+        serializer = serializers.JournalSerializer()
+
+        for field_name in ("active", "validated_by", "validated_at"):
+            self.assertTrue(serializer.fields[field_name].read_only)
+
+    def test_create_ignores_client_controlled_publication_fields(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "1010-2020",
+                "title": "Journal pendiente",
+                "active": True,
+                "validated_by": self.system.pk,
+                "validated_at": timezone.now().isoformat(),
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/pending",
+                }],
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
+
     def test_journal_serializer_create_with_all_relations(self):
         """
         Crea una revista y sincroniza las seis relaciones configuradas.
@@ -118,7 +149,7 @@ class JournalSerializersTests(TestCase):
             "issn": "1234 567X",
             "title": "Journal de Ingeniería",
             "editorial": self.editorial.pk,
-            "license": "CC BY",
+            "publication_date": "2020-01-01",
             "has_apc": False,
             "start_period": "2020-01-01",
             "languages": [self.language.pk],
@@ -130,6 +161,7 @@ class JournalSerializersTests(TestCase):
             "platforms": [
                 {
                     "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/engineering",
                     "start_period": "2021-01-01",
                     "finish_period": "2026-12-31",
                     "has_full_text": True,
@@ -211,6 +243,10 @@ class JournalSerializersTests(TestCase):
             data={
                 "issn": " 1234 567x ",
                 "title": "ISSN Normalizado",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/normalized",
+                }],
             }
         )
 
@@ -304,6 +340,13 @@ class JournalSerializersTests(TestCase):
                     self.academic_program.pk,
                     self.academic_program_secondary.pk,
                 ],
+<<<<<<< HEAD
+=======
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/derived",
+                }],
+>>>>>>> production
             }
         )
 
@@ -331,6 +374,13 @@ class JournalSerializersTests(TestCase):
                 "title": "Journal Read Only",
                 "knowledge_areas": [999999],
                 "academic_programs": [self.academic_program.pk],
+<<<<<<< HEAD
+=======
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/read-only",
+                }],
+>>>>>>> production
             }
         )
 
@@ -458,6 +508,7 @@ class JournalSerializersTests(TestCase):
                         "start_period": "2020-01-01",
                         "finish_period": "2026-12-31",
                         "has_full_text": True,
+                        "journal_url": "https://8.8.8.8/soft-delete",
                     }
                 ],
             },
@@ -627,6 +678,7 @@ class JournalSerializersTests(TestCase):
                         "start_period": "2020-01-01",
                         "finish_period": "2025-12-31",
                         "has_full_text": False,
+                        "journal_url": "https://8.8.8.8/platform-update",
                     }
                 ]
             },
@@ -735,6 +787,12 @@ class JournalSerializersTests(TestCase):
             user=self.system,
             explanation="Eliminada para prueba",
         )
+        self.platform.status = Platform.Status.BORRADOR
+        self.platform.validated_by = None
+        self.platform.validated_at = None
+        self.platform.save(
+            update_fields=["status", "validated_by", "validated_at"]
+        )
 
         serializer = serializers.JournalSerializer(
             instance=journal,
@@ -745,6 +803,7 @@ class JournalSerializersTests(TestCase):
                         "start_period": "2021-01-01",
                         "finish_period": "2026-12-31",
                         "has_full_text": True,
+                        "journal_url": "https://8.8.8.8/restored-link",
                     }
                 ]
             },
@@ -779,6 +838,8 @@ class JournalSerializersTests(TestCase):
         self.assertTrue(
             link.has_full_text
         )
+        self.platform.refresh_from_db()
+        self.assertEqual(self.platform.status, Platform.Status.BORRADOR)
 
     def test_duplicate_platforms_are_rejected(self):
         """
@@ -811,7 +872,11 @@ class JournalSerializersTests(TestCase):
             serializer.errors,
         )
 
+<<<<<<< HEAD
     def test_platform_relation_rejects_draft_platform(self):
+=======
+    def test_platform_relation_allows_draft_platform(self):
+>>>>>>> production
         draft_platform = Platform.objects.create(
             name="Draft Association",
             status=Platform.Status.BORRADOR,
@@ -822,6 +887,7 @@ class JournalSerializersTests(TestCase):
             data={
                 "issn": "6789-0123",
                 "title": "Draft Association Journal",
+<<<<<<< HEAD
                 "platforms": [{"platform": draft_platform.pk}],
             }
         )
@@ -830,6 +896,29 @@ class JournalSerializersTests(TestCase):
         self.assertIn("platforms", serializer.errors)
 
     def test_platform_relation_rejects_obsolete_platform(self):
+=======
+                "platforms": [{
+                    "platform": draft_platform.pk,
+                    "journal_url": "https://8.8.8.8/draft",
+                }],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform=draft_platform,
+            ).exists()
+        )
+        draft_platform.refresh_from_db()
+        self.assertEqual(draft_platform.status, Platform.Status.BORRADOR)
+        self.assertIsNone(draft_platform.validated_by)
+        self.assertIsNone(draft_platform.validated_at)
+
+    def test_platform_relation_allows_obsolete_platform(self):
+>>>>>>> production
         obsolete_platform = Platform.objects.create(
             name="Obsolete Association",
             status=Platform.Status.OBSOLETO,
@@ -840,19 +929,46 @@ class JournalSerializersTests(TestCase):
             data={
                 "issn": "7890-1234",
                 "title": "Obsolete Association Journal",
+<<<<<<< HEAD
                 "platforms": [{"platform": obsolete_platform.pk}],
             }
         )
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("platforms", serializer.errors)
+=======
+                "platforms": [{
+                    "platform": obsolete_platform.pk,
+                    "journal_url": "https://8.8.8.8/obsolete",
+                }],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform=obsolete_platform,
+            ).exists()
+        )
+        obsolete_platform.refresh_from_db()
+        self.assertEqual(obsolete_platform.status, Platform.Status.OBSOLETO)
+>>>>>>> production
 
     def test_platform_relation_allows_published_platform(self):
         serializer = serializers.JournalSerializer(
             data={
                 "issn": "8901-2345",
                 "title": "Published Association Journal",
+<<<<<<< HEAD
                 "platforms": [{"platform": self.platform.pk}],
+=======
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/published",
+                }],
+>>>>>>> production
             }
         )
 
@@ -986,6 +1102,7 @@ class JournalSerializersTests(TestCase):
 
         draft_platform = Platform.objects.create(
             name="Draft Platform",
+            is_harvestable=True,
             base_api_url="https://api.draft.test",
             status=Platform.Status.BORRADOR,
             created_by=self.system,
@@ -1046,9 +1163,207 @@ class JournalSerializersTests(TestCase):
             {
                 "id": self.platform.pk,
                 "name": self.platform.name,
-                "base_api_url": self.platform.base_api_url,
+                "public_url": None,
+                "journal_url": None,
                 "start_period": date(2020, 1, 1),
                 "finish_period": date(2026, 12, 31),
                 "has_full_text": True,
             },
         )
+
+    def test_journal_platforms_expose_distinct_public_and_journal_urls(self):
+        journal = self._journal(active=True)
+        second_platform = Platform.objects.create(
+            name="Otra plataforma",
+            status=Platform.Status.PUBLICADO,
+            is_harvestable=True,
+            base_api_url="https://api.other.test",
+            created_by=self.system,
+        )
+        first_link = models.SharedJournalPlatform.objects.create(
+            journal=journal,
+            platform=self.platform,
+            created_by=self.system,
+        )
+        second_link = models.SharedJournalPlatform.objects.create(
+            journal=journal,
+            platform=second_platform,
+            created_by=self.system,
+        )
+        for platform, public_url in (
+            (self.platform, "https://public.first.test"),
+            (second_platform, "https://public.second.test"),
+        ):
+            LinkCheckLog.objects.create(
+                platform=platform,
+                url=public_url,
+                last_check=timezone.now(),
+                created_by=self.system,
+            )
+        LinkCheckLog.objects.create(
+            platform=self.platform,
+            journal_platform=first_link,
+            url="https://public.first.test/journal",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+        LinkCheckLog.objects.create(
+            platform=second_platform,
+            journal_platform=second_link,
+            url="https://public.second.test/journal",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+
+        data = serializers.JournalPublicSerializer(journal).data
+        urls = {
+            item["id"]: (item["public_url"], item["journal_url"])
+            for item in data["platforms"]
+        }
+
+        self.assertEqual(
+            urls[self.platform.pk],
+            ("https://public.first.test", "https://public.first.test/journal"),
+        )
+        self.assertEqual(
+            urls[second_platform.pk],
+            ("https://public.second.test", "https://public.second.test/journal"),
+        )
+
+    def test_link_log_rejects_mismatched_platform_relation(self):
+        journal = self._journal()
+        other_platform = Platform.objects.create(
+            name="Plataforma inconsistente",
+            status=Platform.Status.PUBLICADO,
+            created_by=self.system,
+        )
+        link = models.SharedJournalPlatform.objects.create(
+            journal=journal,
+            platform=self.platform,
+            created_by=self.system,
+        )
+
+        with self.assertRaises(ValidationError):
+            LinkCheckLog.objects.create(
+                platform=other_platform,
+                journal_platform=link,
+                url="https://invalid.example.org",
+                created_by=self.system,
+            )
+
+    def test_journal_url_is_writable_and_public_url_is_read_only(self):
+        field = serializers.JournalPlatformRelationSerializer().fields
+        self.assertTrue(field["public_url"].read_only)
+        self.assertFalse(field["journal_url"].read_only)
+
+    def test_journal_url_creates_history_for_the_platform_relation(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "2468-1357",
+                "title": "Revista con URL contextual",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.4.4/journal/first",
+                }],
+            }
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        journal = serializer.save(created_by=self.system)
+        link = models.SharedJournalPlatform.objects.get(
+            journal=journal,
+            platform=self.platform,
+        )
+        log = LinkCheckLog.objects.get(journal_platform=link)
+
+        self.assertEqual(log.platform, self.platform)
+        self.assertEqual(log.url, "https://8.8.4.4/journal/first")
+        self.assertFalse(hasattr(journal, "journal_url"))
+        self.assertFalse(hasattr(link, "journal_url"))
+
+        same_url = serializers.JournalSerializer(
+            journal,
+            data={"platforms": [{
+                "platform": self.platform.pk,
+                "journal_url": "https://8.8.4.4/journal/first",
+            }]},
+            partial=True,
+        )
+        self.assertTrue(same_url.is_valid(), same_url.errors)
+        same_url.save(updated_by=self.system)
+        self.assertEqual(LinkCheckLog.objects.filter(journal_platform=link).count(), 1)
+
+        new_url = serializers.JournalSerializer(
+            journal,
+            data={"platforms": [{
+                "platform": self.platform.pk,
+                "journal_url": "https://1.1.1.1/journal/second",
+            }]},
+            partial=True,
+        )
+        self.assertTrue(new_url.is_valid(), new_url.errors)
+        new_url.save(updated_by=self.system)
+        self.assertEqual(LinkCheckLog.objects.filter(journal_platform=link).count(), 2)
+
+    def test_journal_url_rejects_unsafe_ssrf_destination(self):
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "1357-2468",
+                "title": "Revista SSRF",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "http://127.0.0.1/private",
+                }],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("platforms", serializer.errors)
+
+    def test_platform_relation_rejects_soft_deleted_platform(self):
+        deleted_platform = Platform.objects.create(
+            name="Deleted Association",
+            created_by=self.system,
+        )
+        deleted_platform.soft_delete(
+            user=self.system,
+            explanation="Eliminada para prueba",
+        )
+        serializer = serializers.JournalSerializer(
+            data={
+                "issn": "9012-3456",
+                "title": "Deleted Platform Journal",
+                "platforms": [{"platform": deleted_platform.pk}],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("platforms", serializer.errors)
+
+    def test_update_can_add_draft_platform(self):
+        journal = self._journal(issn="9123-4567")
+        draft_platform = Platform.objects.create(
+            name="Draft Update Association",
+            status=Platform.Status.BORRADOR,
+            created_by=self.system,
+        )
+        serializer = serializers.JournalSerializer(
+            journal,
+            data={"platforms": [{
+                "platform": draft_platform.pk,
+                "journal_url": "https://8.8.8.8/draft-update",
+            }]},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(updated_by=self.system)
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal=journal,
+                platform=draft_platform,
+            ).exists()
+        )
+        draft_platform.refresh_from_db()
+        self.assertEqual(draft_platform.status, Platform.Status.BORRADOR)
+        self.assertIsNone(draft_platform.validated_by)
+        self.assertIsNone(draft_platform.validated_at)

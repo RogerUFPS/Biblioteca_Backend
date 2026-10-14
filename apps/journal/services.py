@@ -8,14 +8,19 @@ from apps.catalog.models import (
     AcademicProgram,
     Country,
     Editorial,
-    KnowledgeArea,
     Language,
     MaterialType,
     SharedAcademicProgramKnowledgeArea,
 )
 from apps.platforms.models import Platform
+from apps.platforms import services as platform_services
 
 from . import models
+from .classification import (
+    recalculate_journals,
+    related_platform_ids,
+)
+from apps.platforms.classification import recalculate_platforms
 
 
 JOURNAL_RELATION_CONFIG = (
@@ -58,23 +63,37 @@ def validate_platform_for_journal_association(
     field_name: str = "platform_id",
 ) -> None:
     """
+<<<<<<< HEAD
     Garantiza que una revista solo pueda asociarse a una plataforma
     publicada.
+=======
+    Garantiza que una revista solo se asocie a una plataforma vigente.
+>>>>>>> production
 
     Esta validación se reutiliza tanto en el serializer administrativo
     como en el servicio interno de creación/cosecha.
     """
+<<<<<<< HEAD
     if platform.status != Platform.Status.PUBLICADO:
         raise ValidationError(
             {
                 field_name: (
                     "La revista no puede asociarse a una plataforma "
                     "que no esté publicada."
+=======
+    if platform.is_deleted:
+        raise ValidationError(
+            {
+                field_name: (
+                    "La plataforma indicada no existe o se encuentra "
+                    "eliminada."
+>>>>>>> production
                 )
             }
         )
 
 
+<<<<<<< HEAD
 def _get_knowledge_area_ids_from_academic_programs(
     academic_program_ids: list[int],
 ) -> list[int]:
@@ -114,6 +133,31 @@ def _get_knowledge_area_ids_from_academic_programs(
         .values_list("knowledge_area_id", flat=True)
         .distinct()
     )
+=======
+def validate_journal_platform_period(
+    *,
+    platform: Platform,
+    start_period: date | None,
+    finish_period: date | None,
+    start_field: str = "start_period",
+    finish_field: str = "finish_period",
+) -> None:
+    """Valida que la cobertura contextual esté contenida en la Platform."""
+    errors = {}
+    if start_period and finish_period and finish_period < start_period:
+        errors[finish_field] = "El período final no puede ser anterior al inicial."
+    if platform.start_period and start_period and start_period < platform.start_period:
+        errors[start_field] = "El período inicial no puede ser anterior al de la plataforma."
+    if platform.finish_period:
+        if finish_period is None:
+            errors[finish_field] = "Una plataforma cerrada no admite una cobertura abierta."
+        elif finish_period > platform.finish_period:
+            errors[finish_field] = "El período final no puede superar el de la plataforma."
+        if start_period and start_period > platform.finish_period:
+            errors[start_field] = "El período inicial no puede superar el fin de la plataforma."
+    if errors:
+        raise ValidationError(errors)
+>>>>>>> production
 
 
 def _normalize_issn(issn: str) -> str:
@@ -157,32 +201,6 @@ def _normalize_issn(issn: str) -> str:
         f"{compact_issn[:4]}-"
         f"{compact_issn[4:]}"
     )
-
-
-def _validate_period(
-    start_period: date | None,
-    finish_period: date | None,
-    *,
-    finish_field: str = "finish_period",
-) -> None:
-    """
-    Verifica que el período final no sea anterior
-    al período inicial.
-    """
-
-    if (
-        start_period
-        and finish_period
-        and finish_period < start_period
-    ):
-        raise ValidationError(
-            {
-                finish_field: (
-                    "El período final no puede ser anterior "
-                    "al período inicial."
-                )
-            }
-        )
 
 
 def _validate_editorial(
@@ -341,7 +359,7 @@ def _sync_source_platform(
     finish_period: date | None,
     has_full_text: bool | None,
     user,
-) -> None:
+) -> models.SharedJournalPlatform:
     """
     Crea, actualiza o restaura la relación entre una revista
     y la plataforma desde la cual fue obtenida.
@@ -395,9 +413,11 @@ def _sync_source_platform(
             else active_link.finish_period
         )
 
-        _validate_period(
-            effective_start,
-            effective_finish,
+        validate_journal_platform_period(
+            platform=platform,
+            start_period=effective_start,
+            finish_period=effective_finish,
+            start_field="platform_start_period",
             finish_field="platform_finish_period",
         )
 
@@ -435,7 +455,12 @@ def _sync_source_platform(
             update_fields=update_fields
         )
 
-        return
+        return active_link
+
+    validate_platform_for_journal_association(
+        platform,
+        field_name="platform_id",
+    )
 
     archived_link = (
         models.SharedJournalPlatform.all_objects
@@ -460,9 +485,11 @@ def _sync_source_platform(
             else archived_link.finish_period
         )
 
-        _validate_period(
-            effective_start,
-            effective_finish,
+        validate_journal_platform_period(
+            platform=platform,
+            start_period=effective_start,
+            finish_period=effective_finish,
+            start_field="platform_start_period",
             finish_field="platform_finish_period",
         )
 
@@ -490,15 +517,17 @@ def _sync_source_platform(
             ]
         )
 
-        return
+        return archived_link
 
-    _validate_period(
-        start_period,
-        finish_period,
+    validate_journal_platform_period(
+        platform=platform,
+        start_period=start_period,
+        finish_period=finish_period,
+        start_field="platform_start_period",
         finish_field="platform_finish_period",
     )
 
-    models.SharedJournalPlatform.objects.create(
+    return models.SharedJournalPlatform.objects.create(
         journal=journal,
         platform=platform,
         start_period=start_period,
@@ -518,18 +547,16 @@ def create_journal(
     issn: str,
     title: str,
     user,
+    platform_id: int,
+    journal_url: str,
     editorial_id: int | None = None,
-    license: str | None = None,
+    publication_date: date | None = None,
     url_image: str | None = None,
     has_apc: bool | None = None,
-    active: bool | None = None,
-    start_period: date | None = None,
-    finish_period: date | None = None,
     language_ids: list[int] | None = None,
     country_ids: list[int] | None = None,
     material_type_ids: list[int] | None = None,
     academic_program_ids: list[int] | None = None,
-    platform_id: int | None = None,
     platform_start_period: date | None = None,
     platform_finish_period: date | None = None,
     has_full_text: bool | None = None,
@@ -544,8 +571,8 @@ def create_journal(
     - Si el ISSN ya existe, actualiza esa revista.
     - Si la revista con ese ISSN estaba eliminada, la restaura.
     - Sincroniza únicamente las clasificaciones suministradas.
-    - Registra la plataforma de procedencia cuando se proporciona.
-    - Actualiza fetched_at cuando proviene de una plataforma.
+    - Exige y registra la plataforma y URL contextual de procedencia.
+    - Actualiza fetched_at.
 
     None en una colección significa "no modificar".
     Una lista vacía significa "eliminar todas las relaciones".
@@ -553,13 +580,22 @@ def create_journal(
     Las áreas del conocimiento no se reciben como entrada: se derivan
     exclusivamente de ``academic_program_ids``.
 
+<<<<<<< HEAD
     Este servicio está diseñado como punto de entrada interno para
     los procesos de cosecha y otros procesos backend.
+=======
+    Este servicio está diseñado como punto de entrada interno para procesos
+    backend. No recibe licencias ni controla la publicación: toda creación o
+    actualización queda pendiente de la acción explícita de publicación.
+>>>>>>> production
     """
 
     normalized_issn = _normalize_issn(
         issn
     )
+    if not journal_url or not journal_url.strip():
+        raise ValidationError({"journal_url": "La URL contextual de la revista es obligatoria."})
+    platform_services.validate_safe_http_url(journal_url, field_name="journal_url")
 
     normalized_title = (
         title.strip()
@@ -594,22 +630,18 @@ def create_journal(
     )
 
     if journal is None:
-        _validate_period(
-            start_period,
-            finish_period,
-        )
-
         create_data = {
             "issn": normalized_issn,
             "title": normalized_title,
             "created_by": user,
+            "active": False,
         }
 
         if editorial_id is not None:
             create_data["editorial_id"] = editorial_id
 
-        if license is not None:
-            create_data["license"] = license
+        if publication_date is not None:
+            create_data["publication_date"] = publication_date
 
         if url_image is not None:
             create_data["url_image"] = url_image
@@ -617,17 +649,7 @@ def create_journal(
         if has_apc is not None:
             create_data["has_apc"] = has_apc
 
-        if active is not None:
-            create_data["active"] = active
-
-        if start_period is not None:
-            create_data["start_period"] = start_period
-
-        if finish_period is not None:
-            create_data["finish_period"] = finish_period
-
-        if platform_id is not None:
-            create_data["fetched_at"] = now
+        create_data["fetched_at"] = now
 
         try:
             # El bloque interno crea un savepoint.
@@ -659,23 +681,6 @@ def create_journal(
         if was_deleted:
             journal.restore()
 
-        effective_start = (
-            start_period
-            if start_period is not None
-            else journal.start_period
-        )
-
-        effective_finish = (
-            finish_period
-            if finish_period is not None
-            else journal.finish_period
-        )
-
-        _validate_period(
-            effective_start,
-            effective_finish,
-        )
-
         update_fields = []
 
         if journal.issn != normalized_issn:
@@ -696,11 +701,9 @@ def create_journal(
                 "editorial_id"
             )
 
-        if license is not None:
-            journal.license = license
-            update_fields.append(
-                "license"
-            )
+        if publication_date is not None:
+            journal.publication_date = publication_date
+            update_fields.append("publication_date")
 
         if url_image is not None:
             journal.url_image = url_image
@@ -714,37 +717,18 @@ def create_journal(
                 "has_apc"
             )
 
-        if active is not None:
-            journal.active = active
-            update_fields.append(
-                "active"
-            )
-
-        if start_period is not None:
-            journal.start_period = start_period
-            update_fields.append(
-                "start_period"
-            )
-
-        if finish_period is not None:
-            journal.finish_period = finish_period
-            update_fields.append(
-                "finish_period"
-            )
-
-        if platform_id is not None:
-            journal.fetched_at = now
-            update_fields.append(
-                "fetched_at"
-            )
+        journal.fetched_at = now
+        update_fields.append("fetched_at")
 
         if was_deleted:
+            journal.active = False
             # Una revista restaurada requiere una nueva validación.
             journal.validated_by = None
             journal.validated_at = None
 
             update_fields.extend(
                 [
+                    "active",
                     "validated_by",
                     "validated_at",
                 ]
@@ -799,6 +783,7 @@ def create_journal(
             user=user,
         )
 
+<<<<<<< HEAD
     if academic_program_ids is not None:
         derived_knowledge_area_ids = (
             _get_knowledge_area_ids_from_academic_programs(
@@ -825,5 +810,39 @@ def create_journal(
             has_full_text=has_full_text,
             user=user,
         )
+=======
+    journal_platform = _sync_source_platform(
+        journal=journal,
+        platform_id=platform_id,
+        start_period=platform_start_period,
+        finish_period=platform_finish_period,
+        has_full_text=has_full_text,
+        user=user,
+    )
+    platform_services.register_link_url(
+        platform=journal_platform.platform,
+        journal_platform=journal_platform,
+        url=journal_url,
+        user=user,
+    )
+>>>>>>> production
+
+    recalculate_journals(
+        [journal.pk],
+        user=user,
+        invalidate_on_change=False,
+    )
+
+    if not created and (journal.active or journal.validated_at is not None):
+        journal.active = False
+        journal.validated_by = None
+        journal.validated_at = None
+        journal.updated_by = user
+        journal.updated_at = now
+        journal.save(update_fields=[
+            "active", "validated_by", "validated_at", "updated_by", "updated_at",
+        ])
+
+    recalculate_platforms(related_platform_ids([journal.pk]), user=user)
 
     return journal

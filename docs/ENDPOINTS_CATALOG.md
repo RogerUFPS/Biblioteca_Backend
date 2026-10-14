@@ -321,3 +321,24 @@ docker compose -f docker/docker-compose.yml run --rm web python manage.py check
 
 La autenticación JWT, los permisos y la protección de escritura se
 implementarán en la Fase B.
+# Clasificación y propagación
+
+`AcademicProgram.knowledge_areas` es la fuente de verdad del catálogo. En
+`POST`/`PUT` se envía la lista y en `PATCH` solo cambia cuando el campo está
+presente. Los vínculos retirados usan Soft Delete y, si vuelven a solicitarse,
+se restaura el mismo registro histórico.
+
+Un programa puede quedar sin áreas, pero la petición debe incluir:
+
+```json
+{
+  "knowledge_areas": [],
+  "confirm_empty_knowledge_areas": true
+}
+```
+
+Sin esa confirmación se responde HTTP 400, porque el cambio puede reclasificar
+Journals y Platforms. `confirm_empty_knowledge_areas` es write-only y no se
+persiste. Los cambios efectivos se propagan únicamente a las Journals que usan
+el programa; si la unión final de áreas no cambia, no se invalida la Journal ni
+se escribe clasificación derivada.

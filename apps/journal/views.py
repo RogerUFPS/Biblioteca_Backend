@@ -1,3 +1,5 @@
+from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 from drf_spectacular.utils import (
     extend_schema,
@@ -11,10 +13,62 @@ from rest_framework.response import Response
 
 from apps.core.viewsets import (
     AuditableViewSet,
+    DeleteSerializer,
     get_acting_user,
 )
 
 from . import filters, models, serializers
+from apps.platforms.classification import recalculate_platforms
+from apps.platforms import models as platform_models
+from apps.platforms import services as platform_services
+from .classification import related_platform_ids
+
+
+class LicenseViewSet(AuditableViewSet):
+    queryset = models.License.objects.all()
+    serializer_class = serializers.LicenseSerializer
+    search_fields = ["name"]
+    ordering_fields = ["name", "created_at", "updated_at"]
+
+
+def _with_platform_urls(queryset, *, published_only=False):
+    platform_links = (
+        models.SharedJournalPlatform.objects
+        .filter(platform__deleted_at__isnull=True)
+        .select_related("platform")
+        .prefetch_related(
+            Prefetch(
+                "platform__link_check_logs",
+                queryset=(
+                    platform_models.LinkCheckLog.objects
+                    .filter(journal_platform__isnull=True)
+                    .order_by(*platform_services.LINK_LOG_ORDERING)
+                ),
+                to_attr="_public_link_logs",
+            ),
+            Prefetch(
+                "link_check_logs",
+                queryset=(
+                    platform_models.LinkCheckLog.objects
+                    .order_by(*platform_services.LINK_LOG_ORDERING)
+                ),
+                to_attr="_journal_link_logs",
+            ),
+        )
+        .order_by("platform__name")
+    )
+    if published_only:
+        platform_links = platform_links.filter(
+            platform__status=platform_models.Platform.Status.PUBLICADO
+        )
+
+    return queryset.prefetch_related(
+        Prefetch(
+            "platform_links",
+            queryset=platform_links,
+            to_attr="_url_platform_links",
+        )
+    )
 
 
 @extend_schema_view(
@@ -107,7 +161,7 @@ class JournalViewSet(AuditableViewSet):
     de revistas académicas.
     """
 
-    queryset = models.Journal.objects.all()
+    queryset = _with_platform_urls(models.Journal.objects.all())
 
     serializer_class = serializers.JournalSerializer
 
@@ -125,12 +179,28 @@ class JournalViewSet(AuditableViewSet):
     ordering_fields = [
         "title",
         "issn",
-        "start_period",
-        "finish_period",
+        "publication_date",
         "created_at",
         "updated_at",
         "fetched_at",
     ]
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        journal = self.get_object()
+        body = DeleteSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        user = get_acting_user(request)
+        platform_ids = related_platform_ids([journal.pk])
+        journal.soft_delete(
+            user=user,
+            explanation=body.validated_data["delete_explanation"],
+        )
+        recalculate_platforms(platform_ids, user=user)
+        return Response(
+            {"detail": "La revista fue eliminada lógicamente.", "permanent": False},
+            status=status.HTTP_200_OK,
+        )
 
     @extend_schema(
         summary="Validar y publicar revista",
@@ -138,7 +208,7 @@ class JournalViewSet(AuditableViewSet):
             "Valida explícitamente la ficha de una revista "
             "y la habilita para consulta pública."
         ),
-        request=None,
+        request=serializers.JournalPublishSerializer,
         responses={
             200: serializers.JournalSerializer,
         },
@@ -149,10 +219,35 @@ class JournalViewSet(AuditableViewSet):
         methods=["post"],
         url_path="publish",
     )
+    @transaction.atomic
     def publish(self, request, pk=None):
         journal = self.get_object()
         user = get_acting_user(request)
         now = timezone.now()
+        body = serializers.JournalPublishSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+
+        if "licenses" in body.validated_data:
+            selected = {item.pk for item in body.validated_data["licenses"]}
+            existing = {
+                link.license_id: link
+                for link in models.SharedJournalLicense.all_objects.filter(journal=journal)
+            }
+            for license_id, link in existing.items():
+                if license_id in selected:
+                    if link.is_deleted:
+                        link.restore()
+                elif not link.is_deleted:
+                    link.soft_delete(
+                        user=user,
+                        explanation="Licencia retirada durante la publicación.",
+                    )
+            for license_id in selected - existing.keys():
+                models.SharedJournalLicense.objects.create(
+                    journal=journal,
+                    license_id=license_id,
+                    created_by=user,
+                )
 
         journal.active = True
         journal.validated_by = user
@@ -169,6 +264,7 @@ class JournalViewSet(AuditableViewSet):
                 "updated_at",
             ]
         )
+        recalculate_platforms(related_platform_ids([journal.pk]), user=user)
 
         return Response(
             self.get_serializer(journal).data,
@@ -193,6 +289,7 @@ class JournalViewSet(AuditableViewSet):
         methods=["post"],
         url_path="deactivate",
     )
+    @transaction.atomic
     def deactivate(self, request, pk=None):
         journal = self.get_object()
         user = get_acting_user(request)
@@ -209,6 +306,7 @@ class JournalViewSet(AuditableViewSet):
                 "updated_at",
             ]
         )
+        recalculate_platforms(related_platform_ids([journal.pk]), user=user)
 
         return Response(
             self.get_serializer(journal).data,
@@ -234,6 +332,7 @@ class JournalViewSet(AuditableViewSet):
         methods=["post"],
         url_path="restore",
     )
+    @transaction.atomic
     def restore(self, request, pk=None):
         model = self.queryset.model
 
@@ -260,6 +359,7 @@ class JournalViewSet(AuditableViewSet):
 
         # Una revista restaurada debe validarse nuevamente
         # antes de regresar a la exploración pública.
+        journal.active = False
         journal.validated_by = None
         journal.validated_at = None
         journal.updated_by = user
@@ -267,12 +367,14 @@ class JournalViewSet(AuditableViewSet):
 
         journal.save(
             update_fields=[
+                "active",
                 "validated_by",
                 "validated_at",
                 "updated_by",
                 "updated_at",
             ]
         )
+        recalculate_platforms(related_platform_ids([journal.pk]), user=user)
 
         return Response(
             self.get_serializer(journal).data,
@@ -305,7 +407,7 @@ class JournalPublicViewSet(
     Exploración pública de revistas activas y validadas.
     """
 
-    queryset = (
+    queryset = _with_platform_urls((
         models.Journal.objects
         .filter(
             active=True,
@@ -315,7 +417,7 @@ class JournalPublicViewSet(
             "editorial"
         )
         .distinct()
-    )
+    ), published_only=True)
 
     serializer_class = (
         serializers.JournalPublicSerializer
@@ -333,6 +435,5 @@ class JournalPublicViewSet(
     ordering_fields = [
         "title",
         "issn",
-        "start_period",
-        "finish_period",
+        "publication_date",
     ]

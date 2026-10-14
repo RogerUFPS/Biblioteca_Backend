@@ -22,6 +22,10 @@ class HarvestingSerializersTestCase(TestCase):
         cls.platform = Platform.objects.create(
             name="OpenAlex",
             base_api_url="https://api.openalex.org",
+<<<<<<< HEAD
+=======
+            is_harvestable=True,
+>>>>>>> production
             created_by=cls.user,
         )
 

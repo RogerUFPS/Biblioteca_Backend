@@ -68,6 +68,11 @@ Errors:   0
 
 ```text
 name
+<<<<<<< HEAD
+=======
+public_url
+is_harvestable
+>>>>>>> production
 base_api_url
 api_key
 url_image
@@ -80,7 +85,10 @@ institutions
 languages
 countries
 material_types
+<<<<<<< HEAD
 academic_programs
+=======
+>>>>>>> production
 ```
 
 Los siguientes campos son de solo lectura o son controlados por el backend:
@@ -91,6 +99,10 @@ status
 validated_by
 validated_at
 knowledge_areas
+<<<<<<< HEAD
+=======
+academic_programs
+>>>>>>> production
 created_by
 created_at
 updated_by
@@ -100,6 +112,7 @@ deleted_at
 delete_explanation
 ```
 
+<<<<<<< HEAD
 `knowledge_areas` **no se selecciona manualmente**. El backend la deriva a partir de `academic_programs` usando la relación `SharedAcademicProgramKnowledgeArea`.
 
 ### 4.2. `base_api_url` y `api_key`
@@ -112,6 +125,25 @@ Son datos de configuración de cosecha y son independientes de la URL pública.
 | URL | `null` | Válido: API sin autenticación |
 | URL | valor | Válido: API con credencial |
 | `null` | valor | **Inválido: HTTP 400** |
+=======
+`academic_programs` y `knowledge_areas` **no se seleccionan manualmente**.
+Platform obtiene los programas de sus Journals elegibles y deriva las áreas
+mediante `SharedAcademicProgramKnowledgeArea`.
+
+### 4.2. `is_harvestable`, `base_api_url` y `api_key`
+
+Son datos de configuración de cosecha y son independientes de la URL pública.
+`is_harvestable` tiene valor predeterminado `false`; solo pasa a `true` cuando
+el cliente lo solicita explícitamente y proporciona una configuración válida.
+
+| `is_harvestable` | `base_api_url` | `api_key` | Resultado |
+| --- | --- | --- | --- |
+| `false` | `null` | `null` | Válido: plataforma de referencia no cosechable |
+| `true` | URL | `null` | Válido: cosecha sin autenticación |
+| `true` | URL | valor | Válido: cosecha con credencial |
+| `true` | `null` | cualquiera | **Inválido: HTTP 400** |
+| `false` | URL o valor | cualquiera | **Inválido: HTTP 400** |
+>>>>>>> production
 
 `api_key` es de solo escritura. El backend la almacena cifrada en `encrypted_api_key`, pero ni `api_key` ni `encrypted_api_key` aparecen en las respuestas.
 
@@ -120,20 +152,38 @@ En un `PATCH`:
 - si `api_key` no se envía, se conserva la credencial actual;
 - `"api_key": null` elimina la credencial existente;
 - `"api_key": ""` se trata como ausencia de credencial.
+<<<<<<< HEAD
 
 ### 4.3. URL pública de la plataforma
 
 La implementación actual **no almacena la URL pública en `Platform`**. Se registra y conserva en el historial `LinkCheckLog.url`.
+=======
+- cambiar `is_harvestable` de `true` a `false` limpia automáticamente `base_api_url` y la credencial cifrada.
+
+La migración inicial conserva la configuración histórica: toda plataforma existente con `base_api_url` no nula ni vacía queda con `is_harvestable=true`; las demás quedan en `false`. La migración no modifica la URL técnica ni la credencial almacenada.
+
+### 4.3. URL pública de la plataforma
+
+La implementación actual **no almacena la URL pública en `Platform`**. `public_url` es un campo virtual aceptado en `POST` y `PATCH`; se registra y conserva en `LinkCheckLog.url`, y se devuelve en las respuestas administrativas y públicas.
+>>>>>>> production
 
 ```text
 Platform
     ↓
+<<<<<<< HEAD
 LinkCheckLog.url   ← URL pública
+=======
+LinkCheckLog.url   ← URL pública (`journal_platform IS NULL`)
+>>>>>>> production
 
 Platform.base_api_url ← API de cosecha
 ```
 
+<<<<<<< HEAD
 La URL pública se registra mediante:
+=======
+La URL pública puede registrarse mediante el campo virtual `public_url` del CRUD normal o verificarse mediante:
+>>>>>>> production
 
 ```text
 POST /api/platforms/{id}/check-link/
@@ -141,6 +191,16 @@ POST /api/platforms/{id}/check-link/
 
 Una plataforma necesita al menos una URL pública registrada en `LinkCheckLog` antes de poder publicarse.
 
+<<<<<<< HEAD
+=======
+Si existe historial, `public_url` se obtiene del último registro general no
+eliminado. Los logs ligados a una revista mediante `journal_platform` no se
+consideran para este campo. `public_url` nunca se toma de `base_api_url`: esta
+última continúa siendo exclusivamente la URL técnica de harvesting.
+
+En `PATCH`, omitir `public_url` conserva el historial; enviar la misma URL no duplica logs y enviar una URL distinta crea un nuevo registro. Toda URL recibida pasa por la validación SSRF del backend.
+
+>>>>>>> production
 ### 4.4. Campos de `ValidSintaxis`
 
 Campos de escritura:
@@ -205,14 +265,43 @@ Cuando una plataforma eliminada se restaura, vuelve a `BORRADOR` y se limpian `v
 
 ### 5.3. Historial de verificación
 
+<<<<<<< HEAD
 `LinkCheckLog` es de solo lectura para el cliente.
+=======
+`LinkCheckLog` es de solo lectura para el cliente. `journal_platform = null` identifica la URL general de la plataforma; un valor no nulo identifica la URL de una revista dentro de esa plataforma. En el segundo caso, la plataforma de ambos FKs debe coincidir.
+
+El estado visual debe interpretarse con `last_check` e `is_active`:
+
+```text
+last_check = null                         → Sin verificar
+last_check != null e is_active = true    → Disponible
+last_check != null e is_active = false   → Error / No disponible
+```
+
+`http_status_code=null` no basta para determinar el estado: puede representar
+una URL aún no verificada o un chequeo fallido sin respuesta HTTP. Cuando sí se
+realiza un chequeo, `last_check` contiene su fecha real. `created_at` solo indica
+cuándo se creó el registro.
+
+El historial se ordena por defecto con las verificaciones realizadas primero:
+`last_check` descendente con nulos al final, seguido por `created_at` e `id`
+descendentes. El orden se aplica antes de la paginación. Los registros sin
+verificar quedan al final y no se mezclan cronológicamente como si fueran
+errores.
+>>>>>>> production
 
 | Método | Ruta | Uso |
 | --- | --- | --- |
 | GET | `/api/platforms/link-check-logs/` | Listar verificaciones |
 | GET | `/api/platforms/link-check-logs/{id}/` | Consultar una verificación |
 
+<<<<<<< HEAD
 No existe `POST`, `PUT`, `PATCH` ni `DELETE` público para fabricar resultados de verificación. Los registros se crean mediante `check-link`.
+=======
+No existe `POST`, `PUT`, `PATCH` ni `DELETE` público para fabricar resultados
+de verificación. Registrar o cambiar `public_url` crea un registro pendiente;
+`check-link` crea el registro correspondiente a una verificación real.
+>>>>>>> production
 
 ### 5.4. Consulta pública
 
@@ -222,6 +311,12 @@ No existe `POST`, `PUT`, `PATCH` ni `DELETE` público para fabricar resultados d
 | GET | `/api/platforms/public/{id}/` | Consultar ficha pública |
 
 Las plataformas `BORRADOR`, `OBSOLETO` o eliminadas no aparecen en este endpoint.
+<<<<<<< HEAD
+=======
+Una Platform puede recibir relaciones administrativas con Journals antes de
+publicarse. Estas relaciones pueden preparar su clasificación derivada, pero no
+alteran su estado ni sustituyen la acción explícita `publish`.
+>>>>>>> production
 
 ## 6. Ejemplos con `curl`
 
@@ -254,8 +349,13 @@ curl -X POST http://localhost:8000/api/platforms/ \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Repositorio institucional",
+<<<<<<< HEAD
     "base_api_url": null,
     "api_key": null,
+=======
+    "public_url": "https://repositorio.ejemplo.org",
+    "is_harvestable": false,
+>>>>>>> production
     "start_period": "2020-01-01",
     "requires_registration": false,
     "has_access_text": true,
@@ -277,6 +377,11 @@ curl -X POST http://localhost:8000/api/platforms/ \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Plataforma con cosecha",
+<<<<<<< HEAD
+=======
+    "public_url": "https://www.ejemplo.org",
+    "is_harvestable": true,
+>>>>>>> production
     "base_api_url": "https://api.ejemplo.org",
     "api_key": "clave-secreta",
     "start_period": "2010-01-01",
@@ -415,6 +520,10 @@ Filtros administrativos disponibles:
 
 ```text
 status
+<<<<<<< HEAD
+=======
+is_harvestable
+>>>>>>> production
 requires_registration
 has_access_text
 valid_sintaxis
@@ -446,6 +555,10 @@ material_type
 academic_program
 requires_registration
 has_access_text
+<<<<<<< HEAD
+=======
+is_harvestable
+>>>>>>> production
 ```
 
 Ejemplos:
@@ -465,6 +578,11 @@ Filtros:
 
 ```text
 platform
+<<<<<<< HEAD
+=======
+journal_platform
+journal_platform__isnull
+>>>>>>> production
 is_active
 ```
 
@@ -476,17 +594,38 @@ fail_count
 created_at
 ```
 
+<<<<<<< HEAD
+=======
+Paginación:
+
+```text
+page       → número de página
+page_size  → cantidad de elementos (10 por defecto, máximo 100)
+```
+
+>>>>>>> production
 Ejemplo:
 
 ```bash
 curl "http://localhost:8000/api/platforms/link-check-logs/?platform=1&is_active=false"
 ```
 
+<<<<<<< HEAD
+=======
+Para consultar únicamente el historial de la URL pública general, sin mezclar
+URLs contextuales de Journals:
+
+```bash
+curl "http://localhost:8000/api/platforms/link-check-logs/?platform=1&journal_platform__isnull=true"
+```
+
+>>>>>>> production
 ## 9. Probar sin modificar la base de datos normal
 
 La suite de Django utiliza una base de datos de pruebas separada. Para ejecutar las pruebas de `platforms`:
 
 ```bash
+<<<<<<< HEAD
 docker compose -f docker/docker-compose.yml exec web python manage.py test apps.platforms --keepdb
 ```
 
@@ -494,12 +633,26 @@ Estado validado de la Fase A:
 
 ```text
 30/30 pruebas OK
+=======
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.platforms --keepdb
+```
+
+Inventario actual de la suite:
+
+```text
+47 pruebas: 6 de modelos, 21 de serializadores, 7 de servicios,
+2 de clasificación y 11 de API.
+>>>>>>> production
 ```
 
 Para validar también el esquema OpenAPI:
 
 ```bash
+<<<<<<< HEAD
 docker compose -f docker/docker-compose.yml exec web python manage.py spectacular --validate --file /tmp/schema.yml
+=======
+docker compose -f docker/docker-compose.yml run --rm web python manage.py spectacular --validate --file /tmp/schema.yml
+>>>>>>> production
 ```
 
 Resultado validado:
@@ -525,3 +678,55 @@ docker compose -f docker/docker-compose.yml exec web python manage.py check
 ```
 
 La autenticación JWT, los permisos y la protección de escritura se implementarán en la Fase B.
+<<<<<<< HEAD
+=======
+# Clasificación derivada vigente
+
+El Frontend no administra `academic_programs` ni `knowledge_areas`; ambos son
+read-only. Platform los obtiene de la unión de programas de sus Journals
+elegibles y de las áreas activas de esos programas:
+
+```text
+AcademicProgram ↔ KnowledgeArea       fuente de verdad
+Journal ↔ AcademicProgram             fuente de verdad
+Journal ↔ Platform                    fuente de verdad
+Journal ↔ KnowledgeArea               derivada
+Platform ↔ AcademicProgram            derivada
+Platform ↔ KnowledgeArea              derivada
+```
+
+Una Journal es elegible si `deleted_at=null`, `active=true`,
+`validated_at!=null` y su `SharedJournalPlatform.deleted_at=null`. Las
+relaciones derivadas se conservan con Soft Delete y se restauran cuando vuelven
+a ser válidas.
+
+Una Platform sin Journals elegibles puede conservar su estado `PUBLICADO` y
+clasificación vacía. Si tiene al menos una Journal elegible pero el resultado
+queda sin programas o sin áreas, una Platform publicada pasa automáticamente a
+`BORRADOR`, limpia su validación y deja de aparecer públicamente. Si después
+recupera una clasificación completa permanece en `BORRADOR`; solo la acción
+explícita `publish` puede publicarla nuevamente. Nunca se usa `OBSOLETO` para
+esta invalidación.
+
+Ejemplo de creación/edición: se envían los metadatos y relaciones no académicas
+(`institutions`, `languages`, `countries`, `material_types`), pero se omiten
+`academic_programs` y `knowledge_areas`.
+## Contrato de URLs y verificación vigente
+
+- `public_url` es obligatoria al crear una Platform, pero no es una columna del
+  modelo: se registra como `LinkCheckLog` general (`journal_platform=null`).
+- Registrar una URL no equivale a verificarla; `last_check=null` significa que
+  todavía no se ha realizado una comprobación HTTP.
+- `POST /api/platforms/{id}/check-link/` verifica la URL pública vigente.
+- `POST /api/platforms/{id}/check-links/` verifica secuencialmente la URL pública
+  y la URL vigente de cada relación Journal-Platform no eliminada. Un fallo
+  individual no detiene las demás comprobaciones.
+- El historial conserva únicamente resultados; el chequeo masivo no recorre
+  URLs históricas ni relaciones eliminadas.
+
+Pendiente: implementar el chequeo global del sistema mediante un job asíncrono.
+No se implementa un recorrido global síncrono.
+
+También continúa pendiente cualquier regla adicional para derivar o sincronizar
+idiomas de Platform; esta fase no modifica ese comportamiento.
+>>>>>>> production

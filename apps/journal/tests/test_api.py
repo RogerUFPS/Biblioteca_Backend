@@ -23,6 +23,7 @@ class JournalAPITests(APITestCase):
             code=0,
             full_name="Sistema",
             email="sistema@test.local",
+            is_superadmin=True,
         )
 
         cls.editorial = Editorial.objects.create(
@@ -66,10 +67,14 @@ class JournalAPITests(APITestCase):
 
         cls.platform = Platform.objects.create(
             name="Scopus API Test",
+            is_harvestable=True,
             base_api_url="https://api.scopus.test",
             status=Platform.Status.PUBLICADO,
             created_by=cls.system,
         )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.system)
 
     def _get_data(
         self,
@@ -119,9 +124,12 @@ class JournalAPITests(APITestCase):
                 "issn": "1476 4687",
                 "title": "Nature",
                 "editorial": self.editorial.pk,
-                "license": "CC BY",
+                "publication_date": "1869-11-04",
                 "has_apc": False,
-                "start_period": "1869-01-01",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/nature",
+                }],
             },
             format="json",
         )
@@ -153,6 +161,55 @@ class JournalAPITests(APITestCase):
             self.system.pk,
         )
 
+<<<<<<< HEAD
+=======
+        self.assertFalse(data["active"])
+        self.assertIsNone(data["validated_by"])
+        self.assertIsNone(data["validated_at"])
+
+    def test_create_cannot_publish_with_read_only_fields(self):
+        response = self.client.post(
+            "/api/journals/",
+            {
+                "issn": "1476-4690",
+                "title": "Journal no publicada",
+                "active": True,
+                "validated_by": self.system.pk,
+                "validated_at": "2026-10-09T12:00:00Z",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/unpublished",
+                }],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        journal = models.Journal.objects.get(pk=self._get_data(response)["id"])
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
+
+    def test_patch_cannot_control_publication_fields(self):
+        journal = self._create_journal(active=False, validated=False)
+
+        response = self.client.patch(
+            f"/api/journals/{journal.pk}/",
+            {
+                "active": True,
+                "validated_by": self.system.pk,
+                "validated_at": "2026-10-09T12:00:00Z",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        journal.refresh_from_db()
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
+
+>>>>>>> production
     def test_create_journal_endpoint_derives_knowledge_areas(self):
         response = self.client.post(
             "/api/journals/",
@@ -161,6 +218,13 @@ class JournalAPITests(APITestCase):
                 "title": "Nature Derived",
                 "academic_programs": [self.academic_program.pk],
                 "knowledge_areas": [999999],
+<<<<<<< HEAD
+=======
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/nature-derived",
+                }],
+>>>>>>> production
             },
             format="json",
         )
@@ -173,7 +237,11 @@ class JournalAPITests(APITestCase):
             [self.knowledge_area.pk],
         )
 
+<<<<<<< HEAD
     def test_create_journal_endpoint_rejects_draft_platform(self):
+=======
+    def test_create_journal_endpoint_allows_draft_platform(self):
+>>>>>>> production
         draft_platform = Platform.objects.create(
             name="Draft API Platform",
             status=Platform.Status.BORRADOR,
@@ -186,13 +254,35 @@ class JournalAPITests(APITestCase):
                 "issn": "1476-4689",
                 "title": "Journal Draft Platform",
                 "platforms": [
+<<<<<<< HEAD
                     {"platform": draft_platform.pk}
+=======
+                    {
+                        "platform": draft_platform.pk,
+                        "journal_url": "https://8.8.8.8/draft-journal",
+                    }
+>>>>>>> production
                 ],
             },
             format="json",
         )
 
+<<<<<<< HEAD
         self.assertEqual(response.status_code, 400)
+=======
+        data = self._get_data(response)
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            models.SharedJournalPlatform.objects.filter(
+                journal_id=data["id"],
+                platform=draft_platform,
+            ).exists()
+        )
+        draft_platform.refresh_from_db()
+        self.assertEqual(draft_platform.status, Platform.Status.BORRADOR)
+        self.assertIsNone(draft_platform.validated_by)
+        self.assertIsNone(draft_platform.validated_at)
+>>>>>>> production
 
     def test_list_journals_returns_active_journals(self):
         """
@@ -288,10 +378,13 @@ class JournalAPITests(APITestCase):
             journal.validated_by_id,
             self.system.pk,
         )
+        self.assertIsNotNone(journal.validated_at)
 
-        self.assertIsNotNone(
-            journal.validated_at
-        )
+        public_response = self.client.get("/api/journals/public/")
+        public_ids = [
+            item["id"] for item in self._get_data(public_response)["results"]
+        ]
+        self.assertIn(journal.pk, public_ids)
 
         self.assertEqual(
             data["id"],
@@ -331,10 +424,64 @@ class JournalAPITests(APITestCase):
             journal.validated_by_id,
             self.system.pk,
         )
+        self.assertIsNotNone(journal.validated_at)
+
+        public_response = self.client.get("/api/journals/public/")
+        public_ids = [
+            item["id"] for item in self._get_data(public_response)["results"]
+        ]
+        self.assertNotIn(journal.pk, public_ids)
 
     # ==========================================================================
-    # SOFT DELETE / ARCHIVED / RESTORE
+    # INVALIDACIÓN Y REPUBLICACIÓN
     # ==========================================================================
+
+    def test_edit_invalidates_and_republish_restores_public_visibility(self):
+        journal = self._create_journal(
+            issn="4545-4545",
+            active=True,
+            validated=True,
+        )
+
+        response = self.client.patch(
+            f"/api/journals/{journal.pk}/",
+            {"title": "Journal revisado"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        journal.refresh_from_db()
+        self.assertFalse(journal.active)
+        self.assertIsNone(journal.validated_by)
+        self.assertIsNone(journal.validated_at)
+
+        public_response = self.client.get("/api/journals/public/")
+        public_ids = [
+            item["id"] for item in self._get_data(public_response)["results"]
+        ]
+        self.assertNotIn(journal.pk, public_ids)
+
+        publish_response = self.client.post(
+            f"/api/journals/{journal.pk}/publish/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(publish_response.status_code, 200)
+        journal.refresh_from_db()
+        self.assertTrue(journal.active)
+        self.assertEqual(journal.validated_by_id, self.system.pk)
+        self.assertIsNotNone(journal.validated_at)
+
+        public_response = self.client.get("/api/journals/public/")
+        public_ids = [
+            item["id"] for item in self._get_data(public_response)["results"]
+        ]
+        self.assertIn(journal.pk, public_ids)
+
+    # ===========================================================================
+    # SOFT DELETE / ARCHIVED / RESTORE
+    # ===========================================================================
 
     def test_destroy_with_business_relation_soft_deletes_journal(self):
         """
@@ -458,6 +605,10 @@ class JournalAPITests(APITestCase):
             journal.is_deleted
         )
 
+        self.assertFalse(
+            journal.active
+        )
+
         self.assertIsNone(
             journal.validated_by
         )
@@ -470,6 +621,25 @@ class JournalAPITests(APITestCase):
             data["id"],
             journal.pk,
         )
+
+        public_response = self.client.get("/api/journals/public/")
+        public_ids = [
+            item["id"] for item in self._get_data(public_response)["results"]
+        ]
+        self.assertNotIn(journal.pk, public_ids)
+
+        publish_response = self.client.post(
+            f"/api/journals/{journal.pk}/publish/",
+            {},
+            format="json",
+        )
+        self.assertEqual(publish_response.status_code, 200)
+
+        public_response = self.client.get("/api/journals/public/")
+        public_ids = [
+            item["id"] for item in self._get_data(public_response)["results"]
+        ]
+        self.assertIn(journal.pk, public_ids)
 
     def test_restore_nonexistent_archived_journal_returns_404(self):
         """

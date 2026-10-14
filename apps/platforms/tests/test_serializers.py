@@ -1,4 +1,7 @@
+from unittest.mock import patch
+
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.account.models import User
 from apps.catalog.models import (
@@ -95,6 +98,8 @@ class PlatformSerializersTests(TestCase):
         """Persiste la API Key cifrada y sincroniza relaciones."""
         data = {
             "name": "Redalyc",
+            "public_url": "https://8.8.8.8/redalyc",
+            "is_harvestable": True,
             "base_api_url": "https://www.redalyc.org",
             "api_key": "my-plain-text-key",
             "start_period": "2000-01-01",
@@ -139,12 +144,20 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             platform.academic_program_links.count(),
+<<<<<<< HEAD
             1,
+=======
+            0,
+>>>>>>> production
         )
 
         self.assertEqual(
             platform.knowledge_area_links.count(),
+<<<<<<< HEAD
             1,
+=======
+            0,
+>>>>>>> production
         )
 
         self.assertEqual(
@@ -154,6 +167,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
+<<<<<<< HEAD
             [self.knowledge_area.pk],
         )
 
@@ -163,6 +177,18 @@ class PlatformSerializersTests(TestCase):
         """Las áreas se derivan automáticamente de los programas académicos."""
         data = {
             "name": "Scielo",
+=======
+            [],
+        )
+
+    def test_platform_serializer_ignores_manual_academic_classification(
+        self,
+    ):
+        """La clasificación manual se ignora porque ambos campos son read-only."""
+        data = {
+            "name": "Scielo",
+            "public_url": "https://8.8.8.8/scielo",
+>>>>>>> production
             "academic_programs": [
                 self.academic_program.pk,
                 self.academic_program_secondary.pk,
@@ -189,10 +215,14 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
+<<<<<<< HEAD
             {
                 self.academic_program.pk,
                 self.academic_program_secondary.pk,
             },
+=======
+            set(),
+>>>>>>> production
         )
 
         self.assertEqual(
@@ -202,10 +232,14 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
+<<<<<<< HEAD
             {
                 self.knowledge_area.pk,
                 self.knowledge_area_secondary.pk,
             },
+=======
+            set(),
+>>>>>>> production
         )
 
         data = serializers.PlatformSerializer(
@@ -214,10 +248,14 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             set(data["knowledge_areas"]),
+<<<<<<< HEAD
             {
                 self.knowledge_area.pk,
                 self.knowledge_area_secondary.pk,
             },
+=======
+            set(),
+>>>>>>> production
         )
 
     def test_platform_serializer_does_not_accept_knowledge_areas_as_input(
@@ -226,6 +264,10 @@ class PlatformSerializersTests(TestCase):
         """Las knowledge_areas no forman parte de la entrada del usuario."""
         data = {
             "name": "JSTOR",
+<<<<<<< HEAD
+=======
+            "public_url": "https://8.8.8.8/jstor",
+>>>>>>> production
             "knowledge_areas": [
                 self.knowledge_area.pk,
             ],
@@ -247,6 +289,13 @@ class PlatformSerializersTests(TestCase):
             "knowledge_areas",
             serializer.validated_data,
         )
+<<<<<<< HEAD
+=======
+        self.assertNotIn(
+            "academic_programs",
+            serializer.validated_data,
+        )
+>>>>>>> production
 
         platform = serializer.save(
             created_by=self.system,
@@ -259,7 +308,11 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
+<<<<<<< HEAD
             [self.knowledge_area.pk],
+=======
+            [],
+>>>>>>> production
         )
 
     def test_platform_serializer_allows_null_api_key_without_base_api_url(
@@ -268,6 +321,10 @@ class PlatformSerializersTests(TestCase):
         """Una plataforma de referencia puede existir sin API ni API Key."""
         data = {
             "name": "Plataforma Referencia",
+<<<<<<< HEAD
+=======
+            "public_url": "https://8.8.8.8/reference",
+>>>>>>> production
             "base_api_url": None,
             "api_key": None,
         }
@@ -289,6 +346,12 @@ class PlatformSerializersTests(TestCase):
             platform.base_api_url,
         )
 
+<<<<<<< HEAD
+=======
+        self.assertFalse(platform.is_harvestable)
+        self.assertFalse(serializer.data["is_harvestable"])
+
+>>>>>>> production
         self.assertIsNone(
             platform.encrypted_api_key,
         )
@@ -304,6 +367,11 @@ class PlatformSerializersTests(TestCase):
         """Una plataforma puede tener API sin requerir una API Key."""
         data = {
             "name": "API Publica",
+<<<<<<< HEAD
+=======
+            "public_url": "https://8.8.8.8/public-api",
+            "is_harvestable": True,
+>>>>>>> production
             "base_api_url": "https://api.publica.org",
             "api_key": None,
         }
@@ -336,6 +404,10 @@ class PlatformSerializersTests(TestCase):
         """Nunca debe existir una API Key asociada a ninguna API base."""
         data = {
             "name": "Configuracion Invalida",
+<<<<<<< HEAD
+=======
+            "public_url": "https://8.8.8.8/invalid-config",
+>>>>>>> production
             "base_api_url": None,
             "api_key": "orphan-key",
         }
@@ -359,6 +431,10 @@ class PlatformSerializersTests(TestCase):
         """Enviar api_key=null elimina una API Key previamente configurada."""
         platform = models.Platform.objects.create(
             name="Plataforma Con API Key",
+<<<<<<< HEAD
+=======
+            is_harvestable=True,
+>>>>>>> production
             base_api_url="https://api.example.org",
             created_by=self.system,
         )
@@ -403,6 +479,10 @@ class PlatformSerializersTests(TestCase):
         """No se puede eliminar base_api_url mientras exista una API Key."""
         platform = models.Platform.objects.create(
             name="API Configurada",
+<<<<<<< HEAD
+=======
+            is_harvestable=True,
+>>>>>>> production
             base_api_url="https://api.example.org",
             created_by=self.system,
         )
@@ -438,6 +518,10 @@ class PlatformSerializersTests(TestCase):
         """Se pueden eliminar simultáneamente base_api_url y API Key."""
         platform = models.Platform.objects.create(
             name="API A Eliminar",
+<<<<<<< HEAD
+=======
+            is_harvestable=True,
+>>>>>>> production
             base_api_url="https://api.example.org",
             created_by=self.system,
         )
@@ -449,6 +533,10 @@ class PlatformSerializersTests(TestCase):
         platform.save()
 
         data = {
+<<<<<<< HEAD
+=======
+            "is_harvestable": False,
+>>>>>>> production
             "base_api_url": None,
             "api_key": None,
         }
@@ -476,10 +564,17 @@ class PlatformSerializersTests(TestCase):
             updated.encrypted_api_key,
         )
 
+<<<<<<< HEAD
     def test_platform_serializer_patch_without_academic_programs_preserves_relations(
         self,
     ):
         """Omitir academic_programs en PATCH no modifica las relaciones existentes."""
+=======
+    def test_platform_serializer_patch_cannot_create_academic_relations(
+        self,
+    ):
+        """Enviar academic_programs por PATCH no crea relaciones derivadas."""
+>>>>>>> production
         platform = models.Platform.objects.create(
             name="Plataforma Existente",
             created_by=self.system,
@@ -528,7 +623,11 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
+<<<<<<< HEAD
             [self.academic_program.pk],
+=======
+            [],
+>>>>>>> production
         )
 
         self.assertEqual(
@@ -538,6 +637,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
+<<<<<<< HEAD
             [self.knowledge_area.pk],
         )
 
@@ -545,6 +645,15 @@ class PlatformSerializersTests(TestCase):
         self,
     ):
         """Enviar academic_programs=[] elimina programas y áreas derivadas."""
+=======
+            [],
+        )
+
+    def test_platform_serializer_empty_academic_programs_is_read_only(
+        self,
+    ):
+        """Enviar academic_programs=[] no administra relaciones derivadas."""
+>>>>>>> production
         platform = models.Platform.objects.create(
             name="Plataforma Clasificada",
             created_by=self.system,
@@ -571,12 +680,20 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             platform.academic_program_links.count(),
+<<<<<<< HEAD
             1,
+=======
+            0,
+>>>>>>> production
         )
 
         self.assertEqual(
             platform.knowledge_area_links.count(),
+<<<<<<< HEAD
             1,
+=======
+            0,
+>>>>>>> production
         )
 
         serializer = serializers.PlatformSerializer(
@@ -658,6 +775,8 @@ class PlatformSerializersTests(TestCase):
 
         data = {
             "name": "Plataforma Archivada",
+            "public_url": "https://8.8.8.8/reactivated",
+            "is_harvestable": True,
             "base_api_url": "https://reactivada.org",
         }
 
@@ -702,6 +821,7 @@ class PlatformSerializersTests(TestCase):
         """PlatformPublicSerializer no debe exponer información interna."""
         platform = models.Platform.objects.create(
             name="Plataforma Publica",
+            is_harvestable=True,
             base_api_url="https://publica.org",
             created_by=self.system,
         )
@@ -750,4 +870,156 @@ class PlatformSerializersTests(TestCase):
 
         self.assertIsNone(
             data["link_status"]["is_active"],
+<<<<<<< HEAD
         )
+=======
+        )
+
+    def test_platform_urls_use_latest_non_deleted_general_log(self):
+        platform = models.Platform.objects.create(
+            name="URL pública",
+            is_harvestable=True,
+            base_api_url="https://api.example.org",
+            created_by=self.system,
+        )
+        old_log = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://public.example.org/old",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+        latest_log = models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://public.example.org/current",
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+        latest_log.soft_delete(self.system, "Registro descartado")
+
+        admin_data = serializers.PlatformSerializer(platform).data
+        public_data = serializers.PlatformPublicSerializer(platform).data
+
+        self.assertEqual(admin_data["public_url"], old_log.url)
+        self.assertEqual(public_data["public_url"], old_log.url)
+        self.assertNotEqual(public_data["public_url"], platform.base_api_url)
+
+    def test_public_url_is_a_virtual_writable_field(self):
+        serializer = serializers.PlatformSerializer(
+            data={
+                "name": "Solo lectura",
+                "public_url": "https://8.8.8.8/public",
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        platform = serializer.save(created_by=self.system)
+        self.assertFalse(hasattr(platform, "public_url"))
+        self.assertTrue(
+            models.LinkCheckLog.objects.filter(
+                platform=platform,
+                journal_platform__isnull=True,
+                url="https://8.8.8.8/public",
+            ).exists()
+        )
+
+    def test_harvestable_platform_requires_base_api_url(self):
+        serializer = serializers.PlatformSerializer(
+            data={
+                "name": "Sin API",
+                "public_url": "https://8.8.8.8/without-api",
+                "is_harvestable": True,
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("base_api_url", serializer.errors)
+
+    def test_non_harvestable_platform_rejects_harvesting_configuration(self):
+        serializer = serializers.PlatformSerializer(
+            data={
+                "name": "Configuración contradictoria",
+                "public_url": "https://8.8.8.8/contradictory",
+                "is_harvestable": False,
+                "base_api_url": "https://api.example.org",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("is_harvestable", serializer.errors)
+
+    def test_disabling_harvesting_clears_api_url_and_key(self):
+        platform = models.Platform.objects.create(
+            name="Cosecha a desactivar",
+            is_harvestable=True,
+            base_api_url="https://api.example.org",
+            created_by=self.system,
+        )
+        platform.set_api_key("secret")
+        platform.save(update_fields=["encrypted_api_key"])
+        serializer = serializers.PlatformSerializer(
+            platform,
+            data={"is_harvestable": False},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        updated = serializer.save(updated_by=self.system)
+
+        self.assertFalse(updated.is_harvestable)
+        self.assertIsNone(updated.base_api_url)
+        self.assertIsNone(updated.encrypted_api_key)
+
+    def test_public_url_patch_preserves_history_without_duplicates(self):
+        platform = models.Platform.objects.create(
+            name="Historial público",
+            created_by=self.system,
+        )
+        models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://8.8.8.8/first",
+            created_by=self.system,
+        )
+
+        unchanged = serializers.PlatformSerializer(
+            platform,
+            data={"public_url": "https://8.8.8.8/first"},
+            partial=True,
+        )
+        self.assertTrue(unchanged.is_valid(), unchanged.errors)
+        unchanged.save(updated_by=self.system)
+        self.assertEqual(platform.link_check_logs.count(), 1)
+
+        changed = serializers.PlatformSerializer(
+            platform,
+            data={"public_url": "https://8.8.8.8/second"},
+            partial=True,
+        )
+        self.assertTrue(changed.is_valid(), changed.errors)
+        changed.save(updated_by=self.system)
+
+        self.assertEqual(platform.link_check_logs.count(), 2)
+        self.assertEqual(
+            serializers.PlatformSerializer(platform).data["public_url"],
+            "https://8.8.8.8/second",
+        )
+
+    @patch(
+        "apps.platforms.serializers.services.register_link_url",
+        side_effect=RuntimeError("link log failed"),
+    )
+    def test_platform_creation_rolls_back_if_public_url_log_fails(self, _mock):
+        serializer = serializers.PlatformSerializer(
+            data={
+                "name": "Creación atómica",
+                "public_url": "https://8.8.8.8/atomic",
+            }
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        with self.assertRaises(RuntimeError):
+            serializer.save(created_by=self.system)
+
+        self.assertFalse(
+            models.Platform.objects.filter(name="creación atómica").exists()
+        )
+>>>>>>> production

@@ -107,6 +107,15 @@ class OpenAlexHarvester:
         """
         Ejecuta el ciclo de recolección para la cosecha configurada.
         """
+<<<<<<< HEAD
+=======
+        if not self.harvest.platform.is_harvestable:
+            raise ValueError(
+                f"La plataforma '{self.harvest.platform.name}' "
+                "no está habilitada para cosecha (is_harvestable=false)."
+            )
+
+>>>>>>> production
         with transaction.atomic():
             harvest = models.Harvest.objects.select_for_update().get(pk=self.harvest.pk)
             if harvest.state != models.Harvest.State.PENDING:
@@ -309,11 +318,16 @@ class OpenAlexHarvester:
             return
 
         title = item.get("display_name") or ""
+<<<<<<< HEAD
         url_image = item.get("image_url") or item.get("image_thumbnail_url")
         active = item.get("is_active")
         if not isinstance(active, bool):
             is_deprecated = item.get("is_deprecated")
             active = not is_deprecated if isinstance(is_deprecated, bool) else None
+=======
+        journal_url = item.get("homepage_url")
+        url_image = item.get("image_url") or item.get("image_thumbnail_url")
+>>>>>>> production
         has_apc = _source_has_apc(item)
         has_full_text = item.get("is_oa")
 
@@ -348,6 +362,7 @@ class OpenAlexHarvester:
                 issn=issn,
                 title=title,
                 user=self.user,
+<<<<<<< HEAD
                 editorial_id=editorial_id,
                 license=item.get("license") or None,
                 url_image=url_image,
@@ -355,6 +370,14 @@ class OpenAlexHarvester:
                 active=active,
                 country_ids=country_ids,
                 platform_id=harvest.platform_id,
+=======
+                platform_id=harvest.platform_id,
+                journal_url=journal_url,
+                editorial_id=editorial_id,
+                url_image=url_image,
+                has_apc=has_apc,
+                country_ids=country_ids,
+>>>>>>> production
                 has_full_text=has_full_text,
             )
             if is_existing:
@@ -370,6 +393,15 @@ def get_harvester_for_platform(harvest: models.Harvest, **kwargs) -> OpenAlexHar
     """
     Factoría que selecciona el recolector adecuado según la plataforma.
     """
+<<<<<<< HEAD
+=======
+    if not harvest.platform.is_harvestable:
+        raise ValueError(
+            f"La plataforma '{harvest.platform.name}' "
+            "no está habilitada para cosecha (is_harvestable=false)."
+        )
+
+>>>>>>> production
     platform_name = (harvest.platform.name or "").lower()
     base_url = (harvest.platform.base_api_url or "").lower()
 
@@ -461,6 +493,17 @@ def _run_schedule_event(event: models.ScheduleEvent) -> list[models.Harvest]:
                 harvest.pk,
                 event.pk,
             )
+<<<<<<< HEAD
+=======
+            harvest.refresh_from_db()
+            if harvest.state == models.Harvest.State.PENDING:
+                harvest.state = models.Harvest.State.FAILED
+                harvest.finished_at = timezone.now()
+                harvest.error_message = str(exc)
+                harvest.save(
+                    update_fields=["state", "finished_at", "error_message"],
+                )
+>>>>>>> production
             failures.append(str(exc))
 
     event.refresh_from_db()

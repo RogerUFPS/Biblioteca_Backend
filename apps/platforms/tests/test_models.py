@@ -37,6 +37,7 @@ class PlatformModelsTests(TestCase):
         """Verifica que la API Key se almacene cifrada y se descifre correctamente."""
         platform = Platform.objects.create(
             name="Scopus Test",
+            is_harvestable=True,
             base_api_url="https://api.elsevier.com",
             created_by=self.system,
         )
@@ -92,6 +93,7 @@ class PlatformModelsTests(TestCase):
         """Verifica el registro de comprobaciones de enlace y su ordenamiento."""
         platform = Platform.objects.create(
             name="Dialnet Test",
+            is_harvestable=True,
             base_api_url="https://dialnet.unirioja.es",
             created_by=self.system,
         )

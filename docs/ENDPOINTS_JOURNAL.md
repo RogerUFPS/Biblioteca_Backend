@@ -30,7 +30,13 @@ La API quedará disponible en:
 http://localhost:8000
 ```
 
+<<<<<<< HEAD
 Para asociar una revista a una plataforma, la plataforma debe existir y encontrarse en estado `PUBLICADO`.
+=======
+Para asociar una revista a una plataforma, la plataforma debe existir y no
+estar eliminada lógicamente. Puede encontrarse en `BORRADOR`, `PUBLICADO` u
+`OBSOLETO`; la asociación no modifica su estado ni la publica.
+>>>>>>> production
 
 ## 3. Swagger y esquema OpenAPI
 
@@ -70,7 +76,12 @@ Las tablas intermedias `SharedJournal*` no tienen endpoints CRUD independientes.
 issn
 title
 editorial
+<<<<<<< HEAD
 license
+=======
+publication_date
+licenses
+>>>>>>> production
 url_image
 has_apc
 start_period
@@ -155,6 +166,10 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 [
   {
     "platform": 1,
+<<<<<<< HEAD
+=======
+    "journal_url": "https://revista.ejemplo.org",
+>>>>>>> production
     "start_period": "2020-01-01",
     "finish_period": null,
     "has_full_text": true
@@ -162,6 +177,7 @@ El campo `platforms` recibe una lista con objetos de esta forma:
 ]
 ```
 
+<<<<<<< HEAD
 Regla obligatoria:
 
 ```text
@@ -170,6 +186,29 @@ Platform = BORRADOR   → HTTP 400
 Platform = OBSOLETO   → HTTP 400
 ```
 
+=======
+En las respuestas, cada relación incluye además:
+
+- `public_url`: URL general navegable de la plataforma, tomada del último `LinkCheckLog` no eliminado cuyo `journal_platform` es nulo.
+- `journal_url`: campo virtual obligatorio para relaciones nuevas y opcional al actualizar una relación existente. La URL se toma del último `LinkCheckLog` no eliminado asociado al `SharedJournalPlatform` correspondiente.
+
+Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de estos valores se obtiene de `base_api_url`, que está reservado para harvesting, ni se persiste en `Journal`, `Platform` o `SharedJournalPlatform`.
+
+Omitir `journal_url` en un `PATCH` conserva el historial. Repetir la URL vigente no crea otro log; una URL diferente genera un nuevo registro. La URL puede pertenecer a un dominio distinto al de `public_url`: se valida seguridad SSRF, no igualdad de hostname.
+
+Regla de asociación:
+
+```text
+Platform no eliminada → permitir asociación en BORRADOR, PUBLICADO u OBSOLETO
+Platform eliminada    → HTTP 400
+```
+
+La asociación es administrativa: no cambia `status`, `validated_by` ni
+`validated_at`. Una Platform en BORRADOR permanece en BORRADOR hasta ejecutar
+explícitamente `POST /api/platforms/{id}/publish/`. En las respuestas públicas
+de Journal solo se muestran relaciones cuya Platform está PUBLICADA.
+
+>>>>>>> production
 También se valida que `finish_period` no sea anterior a `start_period`.
 
 ### 4.5. Servicio interno `create_journal()`
@@ -196,7 +235,12 @@ has_full_text
 
 `create_journal()` **no recibe `knowledge_area_ids`**. Las áreas se derivan exclusivamente desde `academic_program_ids`.
 
+<<<<<<< HEAD
 Si recibe `platform_id`, esa plataforma también debe estar `PUBLICADO`.
+=======
+Si recibe `platform_id`, la plataforma debe existir y no estar eliminada
+lógicamente. No se exige que esté `PUBLICADO`.
+>>>>>>> production
 
 ## 5. Operaciones generales
 
@@ -215,7 +259,17 @@ Si recibe `platform_id`, esa plataforma también debe estar `PUBLICADO`.
 | POST | `/api/journals/{id}/publish/` | Activar y validar revista | 200 |
 | POST | `/api/journals/{id}/deactivate/` | Marcar revista como inactiva | 200 |
 
+<<<<<<< HEAD
 `active`, `validated_by` y `validated_at` no se modifican directamente desde el serializer administrativo.
+=======
+`active`, `validated_by` y `validated_at` son campos de solo lectura en el
+serializer administrativo. El cliente puede consultarlos, pero no controlarlos
+mediante `POST`, `PUT` o `PATCH`.
+
+Crear una revista, manualmente o mediante harvesting, siempre la deja pendiente
+de publicación: `active=false`, `validated_by=null` y `validated_at=null`. La
+única operación que la publica es `POST /api/journals/{id}/publish/`.
+>>>>>>> production
 
 Una actualización de la ficha limpia la validación previa. Por tanto, una revista modificada debe publicarse nuevamente antes de regresar a la consulta pública.
 
@@ -231,6 +285,10 @@ Para aparecer en la consulta pública una revista debe cumplir simultáneamente:
 ```text
 active = True
 validated_at != null
+<<<<<<< HEAD
+=======
+deleted_at = null
+>>>>>>> production
 ```
 
 Las revistas eliminadas lógicamente tampoco aparecen.
@@ -246,6 +304,7 @@ curl -X POST http://localhost:8000/api/journals/ \
     "issn": "1476 4687",
     "title": "Nature",
     "editorial": 1,
+<<<<<<< HEAD
     "license": "CC BY",
     "has_apc": false,
     "start_period": "1869-01-01",
@@ -261,6 +320,29 @@ El ISSN se almacena normalizado como `1476-4687`.
 La respuesta incluye las `knowledge_areas` derivadas automáticamente de `academic_programs`.
 
 ### 6.2. Crear una revista asociada a una plataforma publicada
+=======
+    "publication_date": "1869-11-04",
+    "has_apc": false,
+    "languages": [1],
+    "countries": [1],
+    "material_types": [1],
+    "academic_programs": [1],
+    "platforms": [{
+      "platform": 1,
+      "journal_url": "https://example.org/nature",
+      "start_period": "1869-11-04"
+    }]
+  }'
+```
+
+El ISSN se almacena normalizado como `1476-4687`. La revista se crea pendiente:
+`active=false`, `validated_by=null` y `validated_at=null`, aunque el cliente
+intente enviar valores diferentes para esos campos de solo lectura.
+
+La respuesta incluye las `knowledge_areas` derivadas automáticamente de `academic_programs`.
+
+### 6.2. Crear una revista asociada a una plataforma
+>>>>>>> production
 
 ```bash
 curl -X POST http://localhost:8000/api/journals/ \
@@ -272,6 +354,10 @@ curl -X POST http://localhost:8000/api/journals/ \
     "platforms": [
       {
         "platform": 1,
+<<<<<<< HEAD
+=======
+        "journal_url": "https://revista.ejemplo.org/",
+>>>>>>> production
         "start_period": "2020-01-01",
         "finish_period": null,
         "has_full_text": true
@@ -280,9 +366,15 @@ curl -X POST http://localhost:8000/api/journals/ \
   }'
 ```
 
+<<<<<<< HEAD
 La plataforma con ID `1` debe estar en estado `PUBLICADO`.
 
 Si está en `BORRADOR` u `OBSOLETO`, la petición responde `400` con el mensaje correspondiente.
+=======
+La plataforma con ID `1` puede estar en `BORRADOR`, `PUBLICADO` u `OBSOLETO`,
+siempre que no esté eliminada lógicamente. La operación no cambia `status`,
+`validated_by` ni `validated_at` de la Platform.
+>>>>>>> production
 
 ### 6.3. Cambiar programas académicos
 
@@ -307,7 +399,11 @@ curl -X PATCH http://localhost:8000/api/journals/1/ \
 ```bash
 curl -X PATCH http://localhost:8000/api/journals/1/ \
   -H "Content-Type: application/json" \
+<<<<<<< HEAD
   -d '{"license":"CC BY 4.0"}'
+=======
+  -d '{"publication_date":"1869-11-04"}'
+>>>>>>> production
 ```
 
 Al no enviar `academic_programs`, las relaciones existentes permanecen iguales.
@@ -334,7 +430,14 @@ validated_at = fecha actual
 curl -X POST http://localhost:8000/api/journals/1/deactivate/
 ```
 
+<<<<<<< HEAD
 La revista deja de aparecer en la consulta pública.
+=======
+La revista queda con `active=false` y deja de aparecer en la consulta pública.
+La acción conserva `validated_by` y `validated_at` como historial de su última
+validación. Una llamada posterior a `/publish/` actualiza nuevamente esos datos
+y puede volver a publicarla.
+>>>>>>> production
 
 ### 6.8. Listar revistas públicas
 
@@ -441,10 +544,15 @@ material_type
 academic_program
 platform
 has_apc
+<<<<<<< HEAD
 start_period_from
 start_period_to
 finish_period_from
 finish_period_to
+=======
+publication_date_from
+publication_date_to
+>>>>>>> production
 ```
 
 Ejemplos:
@@ -457,7 +565,11 @@ curl "http://localhost:8000/api/journals/public/?knowledge_area=1"
 curl "http://localhost:8000/api/journals/public/?academic_program=1"
 curl "http://localhost:8000/api/journals/public/?platform=1"
 curl "http://localhost:8000/api/journals/public/?has_apc=false"
+<<<<<<< HEAD
 curl "http://localhost:8000/api/journals/public/?start_period_from=2020-01-01"
+=======
+curl "http://localhost:8000/api/journals/public/?publication_date_from=2020-01-01"
+>>>>>>> production
 ```
 
 El filtro `platform` únicamente considera relaciones con plataformas que continúan en estado `PUBLICADO`.
@@ -469,6 +581,7 @@ También admite `search` por título/ISSN y ordenamiento por `title`, `issn`, `s
 La suite de Django utiliza una base de datos de pruebas separada. Para ejecutar las pruebas de `journal`:
 
 ```bash
+<<<<<<< HEAD
 docker compose -f docker/docker-compose.yml exec web python manage.py test apps.journal --keepdb
 ```
 
@@ -476,21 +589,42 @@ Estado validado de la Fase A:
 
 ```text
 74/74 pruebas OK
+=======
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.journal --keepdb
+```
+
+Inventario actual de la suite:
+
+```text
+85 pruebas
+>>>>>>> production
 ```
 
 Distribución actual:
 
 ```text
+<<<<<<< HEAD
 Modelos:         11
 Serializadores:  21
 Servicios:       23
 API:             19
+=======
+Modelos:          11
+Serializadores:   28
+Clasificación:     3
+Servicios:        24
+API:              19
+>>>>>>> production
 ```
 
 Para validar también el esquema OpenAPI:
 
 ```bash
+<<<<<<< HEAD
 docker compose -f docker/docker-compose.yml exec web python manage.py spectacular --validate --file /tmp/schema.yml
+=======
+docker compose -f docker/docker-compose.yml run --rm web python manage.py spectacular --validate --file /tmp/schema.yml
+>>>>>>> production
 ```
 
 Resultado validado:
@@ -504,7 +638,11 @@ Errors:   0
 
 | Código | Causa típica |
 | --- | --- |
+<<<<<<< HEAD
 | 400 | ISSN inválido, período incoherente, relación duplicada, plataforma no publicada o identificador de catálogo inválido |
+=======
+| 400 | ISSN inválido, período incoherente, relación duplicada, plataforma eliminada, URL insegura o identificador de catálogo inválido |
+>>>>>>> production
 | 404 | ID inexistente o revista eliminada |
 | 405 | Método HTTP no permitido, por ejemplo intentar escribir sobre `/public/` |
 | 500 al iniciar | Dependencias, `.env` o migraciones pendientes |
@@ -516,3 +654,58 @@ docker compose -f docker/docker-compose.yml exec web python manage.py check
 ```
 
 La autenticación JWT, los permisos y la protección de escritura se implementarán en la Fase B.
+<<<<<<< HEAD
+=======
+# Clasificación académica vigente
+
+El Frontend administra `academic_programs`. `knowledge_areas` es read-only y
+se calcula como la unión sin duplicados de las áreas activas de los programas
+activos asociados. Por ejemplo:
+
+```json
+{
+  "issn": "1234-5678",
+  "title": "Revista de ejemplo",
+  "academic_programs": [1, 4]
+}
+```
+
+No se debe enviar `knowledge_areas`. Un `PATCH` que omite
+`academic_programs` conserva la clasificación; una lista vacía elimina
+lógicamente los vínculos fuente y las áreas derivadas.
+
+Toda edición que requiere revisión deja la Journal con `active=false`,
+`validated_by=null` y `validated_at=null`. Esto la excluye inmediatamente de
+la clasificación de sus Platforms. La acción `publish` vuelve a validarla y
+recalcula dichas Platforms. El borrado y la restauración son lógicos; una
+Journal restaurada permanece inactiva y sin validar hasta una publicación
+explícita.
+
+La arquitectura actual no realiza cascada lógica automática sobre
+`SharedJournalPlatform` al eliminar una Journal; conserva esos vínculos
+históricos activos, pero dejan de aportar clasificación porque la Journal está
+eliminada. Al restaurarla siguen sin aportar hasta que sea republicada.
+
+Una Journal aporta a Platform solo cuando ella y el vínculo Journal–Platform
+no están eliminados, `active=true` y `validated_at` no es nulo. Los vínculos
+nuevos o restaurados admiten Platforms en cualquier estado, siempre que no
+estén eliminadas. Asociar una Platform no cambia su estado ni sus datos de
+validación.
+## Contrato estructural vigente
+
+- `publication_date` es la fecha propia de publicación/origen de la revista.
+- Los periodos de cobertura existen exclusivamente en cada relación incluida en
+  `platforms` (`start_period` y `finish_period`).
+- Toda relación nueva requiere `journal_url`; se registra en `LinkCheckLog` y no
+  como columna de Journal o `SharedJournalPlatform`.
+- Una Journal nueva requiere al menos una Platform.
+- `licenses` expone las licencias asociadas. Las licencias se administran en
+  `/api/journals/licenses/`.
+- `POST /api/journals/{id}/publish/` acepta opcionalmente
+  `{"licenses": [1, 2]}`. Omitir el campo conserva las relaciones y enviar una
+  lista vacía las elimina lógicamente. Todavía se permite publicar sin licencia.
+- El servicio `create_journal()` exige `platform_id` y `journal_url`, no recibe
+  licencias y registra la URL contextual de forma atómica.
+
+Pendiente: evaluar que una licencia sea obligatoria para publicar.
+>>>>>>> production

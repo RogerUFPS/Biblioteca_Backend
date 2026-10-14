@@ -2,6 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from apps.core.viewsets import ArchivedNameMixin
+from apps.core.relations import sync_auditable_relation_ids
 
 from . import models
 
@@ -77,13 +78,26 @@ class AcademicProgramSerializer(ArchivedNameMixin, serializers.ModelSerializer):
         many=True,
         queryset=models.KnowledgeArea.objects.all(),
         required=True,
-        allow_empty=False,
         write_only=True,
+    )
+    confirm_empty_knowledge_areas = serializers.BooleanField(
+        write_only=True,
+        required=False,
+        default=False,
+        help_text=(
+            "Confirmación explícita requerida para dejar el programa sin "
+            "áreas; puede reclasificar revistas y plataformas relacionadas."
+        ),
     )
 
     class Meta:
         model = models.AcademicProgram
-        fields = [*AUDIT_FIELDS, "name", "knowledge_areas"]
+        fields = [
+            *AUDIT_FIELDS,
+            "name",
+            "knowledge_areas",
+            "confirm_empty_knowledge_areas",
+        ]
         read_only_fields = AUDIT_FIELDS
 
     def validate_knowledge_areas(self, value):
@@ -93,45 +107,66 @@ class AcademicProgramSerializer(ArchivedNameMixin, serializers.ModelSerializer):
             )
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if (
+            "knowledge_areas" in attrs
+            and not attrs["knowledge_areas"]
+            and not attrs.get("confirm_empty_knowledge_areas", False)
+        ):
+            raise serializers.ValidationError({
+                "confirm_empty_knowledge_areas": (
+                    "El programa quedará sin áreas del conocimiento. Esto puede "
+                    "cambiar la clasificación de revistas y plataformas "
+                    "relacionadas; confirme explícitamente enviando true."
+                )
+            })
+        return attrs
+
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         representation["knowledge_areas"] = list(
-            instance.knowledge_area_links.values_list("knowledge_area_id", flat=True)
+            instance.knowledge_area_links.filter(
+                knowledge_area__deleted_at__isnull=True,
+            ).values_list("knowledge_area_id", flat=True)
         )
         return representation
 
     @transaction.atomic
     def create(self, validated_data):
         knowledge_areas = validated_data.pop("knowledge_areas")
+        validated_data.pop("confirm_empty_knowledge_areas", None)
         program = super().create(validated_data)
-        models.SharedAcademicProgramKnowledgeArea.objects.bulk_create(
-            [
-                models.SharedAcademicProgramKnowledgeArea(
-                    academic_program=program,
-                    knowledge_area=knowledge_area,
-                    created_by=program.created_by,
-                )
-                for knowledge_area in knowledge_areas
-            ]
+        sync_auditable_relation_ids(
+            through_model=models.SharedAcademicProgramKnowledgeArea,
+            parent_field="academic_program",
+            parent_id=program.pk,
+            related_field="knowledge_area",
+            desired_ids=(area.pk for area in knowledge_areas),
+            user=program.created_by,
+            delete_explanation="Relación programa-área retirada durante la actualización.",
         )
         return program
 
     @transaction.atomic
     def update(self, instance, validated_data):
         knowledge_areas = validated_data.pop("knowledge_areas", None)
+        validated_data.pop("confirm_empty_knowledge_areas", None)
         program = super().update(instance, validated_data)
         if knowledge_areas is not None:
-            models.SharedAcademicProgramKnowledgeArea.objects.filter(
-                academic_program=program,
-            ).delete()
-            models.SharedAcademicProgramKnowledgeArea.objects.bulk_create(
-                [
-                    models.SharedAcademicProgramKnowledgeArea(
-                        academic_program=program,
-                        knowledge_area=knowledge_area,
-                        created_by=program.created_by,
-                    )
-                    for knowledge_area in knowledge_areas
-                ]
+            user = program.updated_by or program.created_by
+            changed = sync_auditable_relation_ids(
+                through_model=models.SharedAcademicProgramKnowledgeArea,
+                parent_field="academic_program",
+                parent_id=program.pk,
+                related_field="knowledge_area",
+                desired_ids=(area.pk for area in knowledge_areas),
+                user=user,
+                delete_explanation=(
+                    "Relación programa-área retirada durante la actualización."
+                ),
             )
+            if changed:
+                from apps.journal.classification import propagate_catalog_change
+                propagate_catalog_change([program.pk], user=user)
         return program

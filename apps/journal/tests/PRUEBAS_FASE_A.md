@@ -2,7 +2,12 @@
 
 Estas pruebas documentan y validan el comportamiento integral del módulo `journal` sin autenticación obligatoria del cliente, utilizando el usuario del sistema con `code=0`.
 
+<<<<<<< HEAD
 **Estado de validación: 74 pruebas ejecutadas y aprobadas al 100%** dentro del contenedor Docker con PostgreSQL.
+=======
+**Cobertura actual: 85 pruebas** distribuidas entre modelos, serializadores,
+servicios, clasificación y API.
+>>>>>>> production
 
 ---
 
@@ -45,16 +50,39 @@ Estas pruebas documentan y validan el comportamiento integral del módulo `journ
 | `test_platform_relation_rejects_invalid_period` | Rechaza una relación con plataforma cuando el período final es anterior al período inicial. |
 | `test_archived_platform_relation_is_restored_and_updated` | Restaura y actualiza correctamente una relación `Journal - Platform` previamente eliminada. |
 | `test_duplicate_platforms_are_rejected` | Rechaza plataformas duplicadas dentro del mismo payload. |
+<<<<<<< HEAD
 | `test_platform_relation_rejects_draft_platform` | Rechaza la asociación de una revista con una plataforma en estado `BORRADOR`. |
 | `test_platform_relation_rejects_obsolete_platform` | Rechaza la asociación de una revista con una plataforma en estado `OBSOLETO`. |
 | `test_platform_relation_allows_published_platform` | Permite asociar una revista únicamente con una plataforma en estado `PUBLICADO`. |
+=======
+| `test_platform_relation_allows_draft_platform` | Permite asociar una revista con una plataforma en estado `BORRADOR` sin publicarla. |
+| `test_platform_relation_allows_obsolete_platform` | Permite asociar una revista con una plataforma no eliminada en estado `OBSOLETO`. |
+| `test_platform_relation_allows_published_platform` | Permite asociar una revista con una plataforma en estado `PUBLICADO`. |
+>>>>>>> production
 | `test_archived_journal_restored_via_serializer` | Una revista eliminada que se recrea con el mismo ISSN es restaurada en lugar de generar un registro duplicado. |
 | `test_partial_update_without_relations_keeps_existing_relations` | Una actualización parcial que no incluye relaciones conserva las relaciones existentes. |
 | `test_public_serializer_excludes_audit_fields_and_includes_public_platform` | `JournalPublicSerializer` no expone campos internos de auditoría y representa las plataformas publicadas con sus atributos de relación. |
+| `test_journal_platforms_expose_distinct_public_and_journal_urls` | Distingue la URL pública general de Platform de la URL contextual de la Journal dentro de esa Platform. |
+| `test_link_log_rejects_mismatched_platform_relation` | Rechaza un `LinkCheckLog` cuya Platform no coincide con la de `SharedJournalPlatform`. |
+| `test_journal_url_is_writable_and_public_url_is_read_only` | Permite escribir `journal_url` y mantiene `public_url` como dato de solo lectura en la relación. |
+| `test_journal_url_creates_history_for_the_platform_relation` | Registra el historial de `journal_url` sin duplicar la URL vigente y sin guardar la URL en Journal o `SharedJournalPlatform`. |
+| `test_journal_url_rejects_unsafe_ssrf_destination` | Rechaza URLs contextuales dirigidas a destinos internos o privados. |
+| `test_platform_relation_rejects_soft_deleted_platform` | Impide crear una relación activa con una Platform eliminada lógicamente. |
+| `test_update_can_add_draft_platform` | Una actualización puede agregar una Platform en `BORRADOR` sin publicarla ni validarla. |
 
 ---
 
-### 3. Servicios y Lógica de Negocio (`apps/journal/tests/test_services.py`)
+### 3. Clasificación derivada (`apps/journal/tests/test_classification.py`)
+
+| Prueba | Resultado Esperado |
+| --- | --- |
+| `test_areas_are_full_union_without_duplicates` | Las áreas derivadas corresponden a la unión completa de las áreas de los programas, sin duplicados. |
+| `test_equal_effective_result_does_not_invalidate` | Un recálculo con el mismo resultado efectivo no invalida innecesariamente la Journal. |
+| `test_derived_link_is_soft_deleted_and_restored` | Las relaciones derivadas se eliminan lógicamente y se restauran cuando vuelven a ser necesarias. |
+
+---
+
+### 4. Servicios y Lógica de Negocio (`apps/journal/tests/test_services.py`)
 
 | Prueba | Resultado Esperado |
 | --- | --- |
@@ -74,23 +102,37 @@ Estas pruebas documentan y validan el comportamiento integral del módulo `journ
 | `test_create_journal_rejects_nonexistent_relation_id` | Rechaza identificadores de relaciones que no existen. |
 | `test_create_journal_rejects_invalid_editorial` | Rechaza una editorial inexistente. |
 | `test_create_journal_rejects_invalid_period` | Rechaza períodos generales de la revista cuando la fecha final es anterior a la inicial. |
+<<<<<<< HEAD
 | `test_create_journal_syncs_source_platform` | Crea correctamente la relación de procedencia con una plataforma publicada y sus atributos propios. |
+=======
+| `test_create_journal_syncs_source_platform` | Crea correctamente la relación de procedencia con una plataforma no eliminada y sus atributos propios. |
+>>>>>>> production
 | `test_source_platform_updates_existing_relation` | Actualiza los atributos de una relación `Journal - Platform` existente. |
 | `test_source_platform_restores_archived_relation` | Restaura una relación `Journal - Platform` previamente eliminada mediante Soft Delete. |
 | `test_source_platform_rejects_invalid_period` | Rechaza un período inválido en la relación con la plataforma. |
 | `test_source_platform_rejects_invalid_platform` | Rechaza una plataforma inexistente. |
+<<<<<<< HEAD
 | `test_source_platform_rejects_draft_platform` | El servicio rechaza una plataforma en estado `BORRADOR` como plataforma de procedencia. |
 | `test_source_platform_rejects_obsolete_platform` | El servicio rechaza una plataforma en estado `OBSOLETO` como plataforma de procedencia. |
+=======
+| `test_source_platform_allows_draft_platform` | El servicio admite una plataforma en estado `BORRADOR` como plataforma de procedencia. |
+| `test_source_platform_allows_obsolete_platform` | El servicio admite una plataforma no eliminada en estado `OBSOLETO`. |
+| `test_source_platform_rejects_soft_deleted_platform` | El servicio rechaza una plataforma eliminada lógicamente. |
+>>>>>>> production
 
 ---
 
-### 4. Endpoints y API (`apps/journal/tests/test_api.py`)
+### 5. Endpoints y API (`apps/journal/tests/test_api.py`)
 
 | Prueba | Resultado Esperado |
 | --- | --- |
 | `test_create_journal_endpoint` | `POST /api/journals/` crea una revista correctamente mediante la API y retorna HTTP 201. |
 | `test_create_journal_endpoint_derives_knowledge_areas` | La creación por API deriva las áreas del conocimiento desde `academic_programs` e ignora cualquier intento de asignarlas manualmente. |
+<<<<<<< HEAD
 | `test_create_journal_endpoint_rejects_draft_platform` | La API rechaza con HTTP 400 la creación de una revista asociada a una plataforma en estado `BORRADOR`. |
+=======
+| `test_create_journal_endpoint_allows_draft_platform` | La API permite crear una revista asociada a una plataforma en `BORRADOR` sin alterar su estado. |
+>>>>>>> production
 | `test_list_journals_returns_active_journals` | `GET /api/journals/` lista las revistas disponibles en el endpoint administrativo y excluye registros eliminados mediante Soft Delete. |
 | `test_publish_action_endpoint` | `POST /api/journals/{id}/publish/` activa y valida una revista, registrando el usuario y la fecha de validación. |
 | `test_deactivate_action_endpoint` | `POST /api/journals/{id}/deactivate/` desactiva una revista. |
@@ -111,6 +153,7 @@ Estas pruebas documentan y validan el comportamiento integral del módulo `journ
 ---
 
 ## Reglas de Negocio Cubiertas
+<<<<<<< HEAD
 
 Además de las validaciones previamente existentes, la suite actual verifica explícitamente las siguientes reglas:
 
@@ -128,9 +171,12 @@ Además de las validaciones previamente existentes, la suite actual verifica exp
 ---
 
 ## Resultado de la Suite
+=======
+>>>>>>> production
 
-Las pruebas fueron ejecutadas de forma independiente por cada capa y posteriormente mediante la suite integral de la aplicación.
+Además de las validaciones previamente existentes, la suite actual verifica explícitamente las siguientes reglas:
 
+<<<<<<< HEAD
 ```text
 Modelos:          11/11 OK
 Serializadores:   21/21 OK
@@ -171,13 +217,67 @@ docker compose -f docker/docker-compose.yml exec web python manage.py spectacula
 El esquema quedó validado sin errores ni advertencias después de documentar correctamente los campos calculados utilizados por `drf-spectacular`.
 
 ---
+=======
+- El administrador selecciona únicamente `academic_programs` para clasificar una revista.
+- `knowledge_areas` es un dato derivado y de solo lectura.
+- Las áreas del conocimiento se calculan mediante `AcademicProgram -> SharedAcademicProgramKnowledgeArea -> KnowledgeArea`.
+- La derivación elimina duplicados cuando varios programas comparten una misma área.
+- Un `PATCH` sin `academic_programs` no modifica la clasificación existente.
+- Enviar `academic_programs: []` elimina lógicamente las relaciones activas con programas y limpia las áreas derivadas.
+- El servicio `create_journal()` recibe programas académicos y deriva internamente las áreas; no recibe áreas del conocimiento como entrada manual.
+- Una revista puede asociarse a una plataforma no eliminada en `BORRADOR`,
+  `PUBLICADO` u `OBSOLETO`.
+- La asociación no cambia `status`, `validated_by` ni `validated_at` de la
+  Platform y no sustituye su acción explícita de publicación.
+- Las Platforms eliminadas lógicamente se rechazan tanto desde los
+  serializadores como desde la lógica de servicios.
+- `public_url` y `journal_url` provienen de historiales independientes en
+  `LinkCheckLog`; ninguna respuesta expone la credencial cifrada.
+- Se mantienen las funcionalidades existentes de Soft Delete, Restore, deduplicación de relaciones, normalización de ISSN, filtros públicos y publicación/desactivación.
+
+---
+
+## Resultado de la Suite
+
+La suite actual se distribuye de la siguiente forma:
+
+```text
+Modelos:          11
+Serializadores:   28
+Clasificación:     3
+Servicios:        24
+API:              19
+--------------------
+TOTAL:            85
+```
+
+Para validar la suite integral de `journal`:
+
+```bash
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.journal --keepdb
+```
+
+## Validación complementaria
+
+Para comprobar la integridad general del proyecto:
+
+```bash
+docker compose -f docker/docker-compose.yml run --rm web python manage.py check
+```
+
+Para validar el esquema OpenAPI/Swagger:
+
+```bash
+docker compose -f docker/docker-compose.yml run --rm web python manage.py spectacular --validate --file /tmp/schema.yml
+```
+>>>>>>> production
 
 ## Ejecutar Pruebas
 
 Para ejecutar la suite completa de `journal` dentro del contenedor Docker:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.journal --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.journal --keepdb
 ```
 
 Para ejecutar cada capa individualmente:
@@ -185,26 +285,38 @@ Para ejecutar cada capa individualmente:
 ### Modelos
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.journal.tests.test_models --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.journal.tests.test_models --keepdb
 ```
 
 ### Serializadores
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.journal.tests.test_serializers --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.journal.tests.test_serializers --keepdb
 ```
 
 ### Servicios
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.journal.tests.test_services --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.journal.tests.test_services --keepdb
 ```
 
 ### API
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.journal.tests.test_api --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.journal.tests.test_api --keepdb
 ```
 
 La bandera `--keepdb` es recomendada al utilizar PostgreSQL / Neon DB para conservar la base de datos temporal de pruebas, evitando la recreación de la base en cada ejecución y reduciendo problemas asociados al cierre de conexiones.
 
+<<<<<<< HEAD
+=======
+## Fase estructural: fechas, licencias y URL contextual
+
+La cobertura temporal se prueba exclusivamente sobre `SharedJournalPlatform` y
+contra el rango de su Platform. Journal expone `publication_date` y ya no posee
+`start_period`, `finish_period` ni el string `license`.
+
+También se cubren las licencias múltiples, su sincronización opcional durante
+`publish`, la obligatoriedad de Platform y `journal_url` en nuevas Journals, y
+el almacenamiento de la URL exclusivamente en `LinkCheckLog`.
+>>>>>>> production

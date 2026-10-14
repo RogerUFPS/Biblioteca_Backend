@@ -10,10 +10,18 @@ from apps.harvesting.models import Harvest, Schedule, ScheduleEvent
 from apps.harvesting.services import (
     OpenAlexHarvester,
     _next_occurrence,
+<<<<<<< HEAD
     run_scheduled_harvests,
 )
 from apps.journal.models import Journal, SharedJournalPlatform
 from apps.platforms.models import Platform
+=======
+    get_harvester_for_platform,
+    run_scheduled_harvests,
+)
+from apps.journal.models import Journal, SharedJournalPlatform
+from apps.platforms.models import LinkCheckLog, Platform
+>>>>>>> production
 
 
 class HarvestingServicesTestCase(TestCase):
@@ -26,7 +34,13 @@ class HarvestingServicesTestCase(TestCase):
         )
         cls.platform = Platform.objects.create(
             name="OpenAlex Services Test",
+<<<<<<< HEAD
             base_api_url="https://api.openalex.org",
+=======
+            status=Platform.Status.PUBLICADO,
+            base_api_url="https://api.openalex.org",
+            is_harvestable=True,
+>>>>>>> production
             created_by=cls.user,
         )
 
@@ -59,6 +73,10 @@ class HarvestingServicesTestCase(TestCase):
                     "display_name": "Revista Uno",
                     "issn_l": "1111-1111",
                     "issn": ["1111-1111"],
+<<<<<<< HEAD
+=======
+                    "homepage_url": "https://8.8.8.8/revista-uno",
+>>>>>>> production
                     "host_organization_name": "Editorial Uno",
                     "is_oa": True,
                 },
@@ -67,6 +85,10 @@ class HarvestingServicesTestCase(TestCase):
                     "display_name": "Revista Dos",
                     "issn_l": "2222-2222",
                     "issn": ["2222-2222"],
+<<<<<<< HEAD
+=======
+                    "homepage_url": "https://8.8.8.8/revista-dos",
+>>>>>>> production
                     "is_oa": False,
                 },
             ],
@@ -90,7 +112,11 @@ class HarvestingServicesTestCase(TestCase):
         mock_response_1.json.return_value["results"][0].update({
             "country_code": "US",
             "image_thumbnail_url": "https://example.test/journal.png",
+<<<<<<< HEAD
             "is_active": False,
+=======
+            "is_active": True,
+>>>>>>> production
             "apc_usd": 1400,
             "license": "CC-BY",
         })
@@ -121,9 +147,23 @@ class HarvestingServicesTestCase(TestCase):
         self.assertEqual(j1.url_image, "https://example.test/journal.png")
         self.assertFalse(j1.active)
         self.assertTrue(j1.has_apc)
+<<<<<<< HEAD
         self.assertEqual(j1.license, "CC-BY")
         self.assertTrue(j1.country_links.filter(country=country).exists())
         self.assertTrue(SharedJournalPlatform.objects.filter(journal=j1, platform=self.platform).exists())
+=======
+        journal_platform = SharedJournalPlatform.objects.get(
+            journal=j1,
+            platform=self.platform,
+        )
+        self.assertEqual(
+            LinkCheckLog.objects.get(journal_platform=journal_platform).url,
+            "https://8.8.8.8/revista-uno",
+        )
+        self.assertFalse(j1.license_links.exists())
+        self.assertTrue(j1.country_links.filter(country=country).exists())
+        self.assertTrue(journal_platform)
+>>>>>>> production
 
         # Probar deduplicación: Segunda cosecha con los mismos datos
         mock_response_dup = MagicMock(spec=httpx.Response)
@@ -135,6 +175,10 @@ class HarvestingServicesTestCase(TestCase):
                     "id": "https://openalex.org/S1",
                     "display_name": "Revista Uno Actualizada",
                     "issn_l": "1111-1111",
+<<<<<<< HEAD
+=======
+                    "homepage_url": "https://8.8.8.8/revista-uno-actualizada",
+>>>>>>> production
                     "is_oa": True,
                 }
             ],
@@ -191,6 +235,10 @@ class HarvestingServicesTestCase(TestCase):
                     "display_name": "Revista Timing",
                     "issn_l": "3333-3333",
                     "issn": ["3333-3333"],
+<<<<<<< HEAD
+=======
+                    "homepage_url": "https://8.8.8.8/revista-timing",
+>>>>>>> production
                 }
             ],
         }
@@ -226,7 +274,13 @@ class HarvestingServicesTestCase(TestCase):
         execute_harvest.side_effect = complete_harvest
         second_platform = Platform.objects.create(
             name="Second Harvest Platform",
+<<<<<<< HEAD
             base_api_url="https://api.openalex.org",
+=======
+            status=Platform.Status.PUBLICADO,
+            base_api_url="https://api.openalex.org",
+            is_harvestable=True,
+>>>>>>> production
             created_by=self.user,
         )
         now = timezone.now()
@@ -249,6 +303,46 @@ class HarvestingServicesTestCase(TestCase):
         self.assertEqual(len(next_harvests), 2)
         self.assertEqual(schedule.events.count(), 2)
 
+<<<<<<< HEAD
+=======
+    def test_scheduled_harvest_fails_if_platform_was_disabled(self):
+        self.platform.is_harvestable = False
+        self.platform.save(update_fields=["is_harvestable"])
+        now = timezone.now()
+        schedule = Schedule.objects.create(
+            frequency=Schedule.Frequency.ONCE,
+            max_quantity=10,
+            start_date=now - timedelta(minutes=1),
+            created_by=self.user,
+        )
+        schedule.platforms.add(self.platform)
+
+        harvests = run_scheduled_harvests(now=now)
+
+        self.assertEqual(len(harvests), 1)
+        self.assertEqual(harvests[0].state, Harvest.State.FAILED)
+        self.assertIn("no está habilitada para cosecha", harvests[0].error_message)
+        self.assertEqual(schedule.events.get().state, ScheduleEvent.State.FAILED)
+
+    def test_non_harvestable_platform_has_no_harvester(self):
+        self.platform.is_harvestable = False
+        self.platform.save(update_fields=["is_harvestable"])
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=10,
+            created_by=self.user,
+        )
+
+        with self.assertRaisesMessage(ValueError, "is_harvestable=false"):
+            get_harvester_for_platform(harvest)
+
+        with self.assertRaisesMessage(ValueError, "is_harvestable=false"):
+            OpenAlexHarvester(harvest, user=self.user).harvest_records()
+
+        harvest.refresh_from_db()
+        self.assertEqual(harvest.state, Harvest.State.PENDING)
+
+>>>>>>> production
     def test_max_quantity_counts_failed_records_too(self):
         response = MagicMock(spec=httpx.Response)
         response.status_code = 200
@@ -282,6 +376,41 @@ class HarvestingServicesTestCase(TestCase):
         self.assertEqual(harvest.api_cursor, "*")
         self.assertEqual(client.get.call_count, 1)
 
+<<<<<<< HEAD
+=======
+    def test_openalex_source_without_homepage_url_is_counted_as_failed(self):
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = 200
+        response.json.return_value = {
+            "meta": {"next_cursor": None},
+            "results": [
+                {
+                    "display_name": "Journal without homepage",
+                    "issn_l": "7777-7777",
+                }
+            ],
+        }
+        client = MagicMock(spec=httpx.Client)
+        client.get.return_value = response
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=10,
+            created_by=self.user,
+        )
+
+        OpenAlexHarvester(
+            harvest=harvest,
+            client=client,
+            user=self.user,
+        ).harvest_records()
+
+        harvest.refresh_from_db()
+        self.assertEqual(harvest.state, Harvest.State.COMPLETED)
+        self.assertEqual(harvest.records_added, 0)
+        self.assertEqual(harvest.records_failed, 1)
+        self.assertFalse(Journal.objects.filter(issn="7777-7777").exists())
+
+>>>>>>> production
     def test_pause_finishes_current_page_and_resume_uses_saved_cursor(self):
         response = MagicMock(spec=httpx.Response)
         response.status_code = 200
@@ -291,6 +420,10 @@ class HarvestingServicesTestCase(TestCase):
                 {
                     "display_name": "Pause-safe journal",
                     "issn_l": "5555-5555",
+<<<<<<< HEAD
+=======
+                    "homepage_url": "https://8.8.8.8/pause-safe",
+>>>>>>> production
                 }
             ],
         }

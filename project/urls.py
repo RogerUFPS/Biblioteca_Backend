@@ -8,6 +8,10 @@ from drf_spectacular.views import (
 
 urlpatterns = [
     path(
+        "api/accounts/",
+        include("apps.account.urls"),
+    ),
+    path(
         "admin/",
         admin.site.urls,
     ),
@@ -27,6 +31,13 @@ urlpatterns = [
         "api/harvesting/",
         include("apps.harvesting.urls"),
     ),
+<<<<<<< HEAD
+=======
+    path(
+        "api/audit/",
+        include("apps.audit.urls"),
+    ),
+>>>>>>> production
 
     # OpenAPI / Swagger
     path(
