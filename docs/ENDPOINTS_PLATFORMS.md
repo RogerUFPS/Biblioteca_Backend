@@ -73,8 +73,6 @@ is_harvestable
 base_api_url
 api_key
 url_image
-start_period
-finish_period
 requires_registration
 has_access_text
 valid_sintaxis
@@ -89,6 +87,8 @@ Los siguientes campos son de solo lectura o son controlados por el backend:
 ```text
 id
 status
+start_period
+finish_period
 validated_by
 validated_at
 knowledge_areas
@@ -297,7 +297,6 @@ curl -X POST http://localhost:8000/api/platforms/ \
     "name": "Repositorio institucional",
     "public_url": "https://repositorio.ejemplo.org",
     "is_harvestable": false,
-    "start_period": "2020-01-01",
     "requires_registration": false,
     "has_access_text": true,
     "valid_sintaxis": 1,
@@ -322,7 +321,6 @@ curl -X POST http://localhost:8000/api/platforms/ \
     "is_harvestable": true,
     "base_api_url": "https://api.ejemplo.org",
     "api_key": "clave-secreta",
-    "start_period": "2010-01-01",
     "valid_sintaxis": 1,
     "institutions": [1],
     "languages": [1],
@@ -636,3 +634,20 @@ No se implementa un recorrido global síncrono.
 
 También continúa pendiente cualquier regla adicional para derivar o sincronizar
 idiomas de Platform; esta fase no modifica ese comportamiento.
+
+## Semántica de fechas del ciclo de vida
+
+- `start_period`: fecha de registro de la plataforma. El backend la asigna al
+  crearla y nunca cambia durante publish, obsolescencia, reactivación o restore.
+- `finish_period`: fecha en que la plataforma fue marcada como `OBSOLETO`.
+  `mark-obsolete` la asigna automáticamente; `reactivate` y restore la limpian.
+- Ambos campos son de solo lectura. Enviarlos en `POST`, `PUT` o `PATCH` produce
+  HTTP 400 y no modifica los valores existentes.
+
+Etiquetas recomendadas para el Frontend:
+
+- `start_period`: **Fecha de registro de la plataforma**.
+- `finish_period`: **Fecha de obsolescencia**.
+
+Pendiente: evaluar eliminar `Platform.start_period` y `Platform.finish_period`
+si `created_at`, el estado y el historial de auditoría resultan suficientes.
