@@ -4,7 +4,8 @@ from rest_framework.test import APITestCase
 from unittest.mock import patch
 
 from apps.account.models import User
-from apps.harvesting.models import Harvest, Schedule, ScheduleEvent
+from apps.harvesting.models import Harvest, HarvestJournal, Schedule, ScheduleEvent
+from apps.journal.models import Journal
 from apps.platforms.models import Platform
 
 
@@ -138,6 +139,69 @@ class HarvestingViewsTestCase(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def test_harvest_journals_returns_only_journals_added_by_that_harvest(self):
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=100,
+            created_by=self.user,
+        )
+        added_journal = Journal.objects.create(
+            issn="1234-5678",
+            title="Revista nueva de cosecha",
+            created_by=self.user,
+        )
+        updated_journal = Journal.objects.create(
+            issn="2345-6789",
+            title="Revista actualizada",
+            created_by=self.user,
+        )
+        other_harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=100,
+            state=Harvest.State.COMPLETED,
+            created_by=self.user,
+        )
+        other_journal = Journal.objects.create(
+            issn="3456-7890",
+            title="Revista de otra cosecha",
+            created_by=self.user,
+        )
+        HarvestJournal.objects.create(
+            harvest=harvest,
+            journal=added_journal,
+            result=HarvestJournal.Result.ADDED,
+        )
+        HarvestJournal.objects.create(
+            harvest=harvest,
+            journal=updated_journal,
+            result=HarvestJournal.Result.UPDATED,
+        )
+        HarvestJournal.objects.create(
+            harvest=other_harvest,
+            journal=other_journal,
+            result=HarvestJournal.Result.ADDED,
+        )
+
+        response = self.client.get(
+            f"/api/harvesting/harvests/{harvest.pk}/journals/",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["total_items"], 1)
+        self.assertEqual(
+            [journal["id"] for journal in response.data["results"]],
+            [added_journal.pk],
+        )
+        self.assertEqual(
+            response.data["results"][0]["title"],
+            added_journal.title,
+        )
+
+    def test_harvest_journals_returns_404_for_unknown_harvest(self):
+        response = self.client.get("/api/harvesting/harvests/999999/journals/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_pending_harvest_can_be_paused_and_resumed(self):
         harvest = Harvest.objects.create(

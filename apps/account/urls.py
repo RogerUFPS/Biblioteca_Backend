@@ -11,11 +11,21 @@ urlpatterns = [
     path("password/change/", views.ChangePasswordView.as_view(), name="password-change"),
     path("password/forgot/", views.ForgotPasswordView.as_view(), name="password-forgot"),
     path("users/", views.UsersView.as_view(), name="account-users"),
+    path(
+        "users/archived/",
+        views.ArchivedUsersView.as_view(),
+        name="account-archived-users",
+    ),
     path("users/invite/", views.InviteView.as_view(), name="account-user-invite"),
     path(
         "users/<int:pk>/",
         views.UserDetailView.as_view(),
         name="account-user-detail",
+    ),
+    path(
+        "users/<int:pk>/restore/",
+        views.UserRestoreView.as_view(),
+        name="account-user-restore",
     ),
     path(
         "users/<int:pk>/permissions/",
