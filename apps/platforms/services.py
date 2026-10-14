@@ -203,7 +203,8 @@ def validate_platform_for_publication(
 
     if not platform.start_period:
         errors["start_period"] = (
-            "La plataforma debe indicar el inicio del período de cobertura."
+            "La plataforma debe tener una fecha de registro administrada "
+            "por el sistema."
         )
 
     if (
@@ -212,7 +213,8 @@ def validate_platform_for_publication(
         and platform.finish_period < platform.start_period
     ):
         errors["finish_period"] = (
-            "El período final no puede ser anterior al período inicial."
+            "La fecha de obsolescencia no puede ser anterior "
+            "a la fecha de registro."
         )
 
     if not platform.valid_sintaxis_id:
@@ -604,12 +606,14 @@ def mark_platform_obsolete(
     now = timezone.now()
 
     platform.status = models.Platform.Status.OBSOLETO
+    platform.finish_period = timezone.localdate()
     platform.updated_by = user
     platform.updated_at = now
 
     platform.save(
         update_fields=[
             "status",
+            "finish_period",
             "updated_by",
             "updated_at",
         ]
@@ -639,6 +643,7 @@ def reactivate_platform(
     now = timezone.now()
 
     platform.status = models.Platform.Status.BORRADOR
+    platform.finish_period = None
 
     platform.validated_by = None
     platform.validated_at = None
@@ -649,6 +654,7 @@ def reactivate_platform(
     platform.save(
         update_fields=[
             "status",
+            "finish_period",
             "validated_by",
             "validated_at",
             "updated_by",
