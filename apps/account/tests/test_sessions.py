@@ -1,4 +1,8 @@
+from datetime import timedelta
+
+from django.contrib.sessions.models import Session
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.account.models import User
@@ -40,7 +44,28 @@ class CookieSessionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("sessionid", response.cookies)
         self.assertTrue(response.cookies["sessionid"]["httponly"])
+        self.assertEqual(response.cookies["sessionid"]["max-age"], 15 * 60)
         self.assertTrue(response.data["user"]["is_superadmin"])
+
+    def test_authenticated_activity_renews_the_session_expiration(self):
+        client = APIClient()
+        self.login(client)
+        session_key = client.cookies["sessionid"].value
+        expiring_soon = timezone.now() + timedelta(minutes=1)
+        Session.objects.filter(session_key=session_key).update(
+            expire_date=expiring_soon,
+        )
+
+        response = client.get("/api/accounts/auth/me/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(client.cookies["sessionid"].value, session_key)
+        renewed_session = Session.objects.get(session_key=session_key)
+        self.assertGreater(
+            renewed_session.expire_date,
+            expiring_soon + timedelta(minutes=13),
+        )
+        self.assertEqual(response.cookies["sessionid"]["max-age"], 15 * 60)
 
     def test_a_second_login_terminates_and_notifies_the_first_session(self):
         first_client = APIClient()
