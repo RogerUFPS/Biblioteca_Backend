@@ -12,7 +12,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .email import EmailDeliveryError, send_email
+from .email import EmailDeliveryError, login_link_html, send_email
 from .models import AccessPreset, SessionTermination, User
 from .permissions import PERMISSION_MATRIX
 from .serializers import (
@@ -183,6 +183,7 @@ class ForgotPasswordView(APIView):
                     "<p>Tu contraseña provisional es:</p>"
                     f"<p><strong>{escape(password)}</strong></p>"
                     "<p>Inicia sesión y cámbiala antes de continuar.</p>"
+                    f"{login_link_html()}"
                 ),
             )
         except EmailDeliveryError as error:
@@ -321,6 +322,7 @@ class InviteView(APIView):
                         "<p>Tu contraseña provisional es:</p>"
                         f"<p><strong>{escape(password)}</strong></p>"
                         "<p>Inicia sesión y cámbiala antes de continuar.</p>"
+                        f"{login_link_html()}"
                     ),
                 )
             except EmailDeliveryError as error:
