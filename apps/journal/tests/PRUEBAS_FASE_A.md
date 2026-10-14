@@ -2,7 +2,7 @@
 
 Estas pruebas documentan y validan el comportamiento integral del módulo `journal` sin autenticación obligatoria del cliente, utilizando el usuario del sistema con `code=0`.
 
-**Cobertura actual: 85 pruebas** distribuidas entre modelos, serializadores,
+**Cobertura actual: 86 pruebas** distribuidas entre modelos, serializadores,
 servicios, clasificación y API.
 
 ---
@@ -231,3 +231,11 @@ contra el rango de su Platform. Journal expone `publication_date` y ya no posee
 También se cubren las licencias múltiples, su sincronización opcional durante
 `publish`, la obligatoriedad de Platform y `journal_url` en nuevas Journals, y
 el almacenamiento de la URL exclusivamente en `LinkCheckLog`.
+# Fechas automáticas de Journal ↔ Platform
+
+- Una relación nueva recibe `start_period` automático y `finish_period=null`.
+- El Soft Delete asigna `finish_period`; restore lo limpia sin cambiar el inicio.
+- POST, PUT y PATCH rechazan periodos enviados dentro de `platforms`.
+- Desactivar o publicar Journal no modifica las fechas de la relación.
+- Una Platform obsoleta puede conservar relaciones vigentes con
+  `finish_period=null`.
