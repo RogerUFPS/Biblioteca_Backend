@@ -50,6 +50,39 @@ class HarvestingServicesTestCase(TestCase):
         finally:
             client.close()
 
+    def test_openalex_client_sends_platform_api_key_as_bearer_token(self):
+        self.platform.set_api_key("openalex-test-key")
+        self.platform.save(update_fields=["encrypted_api_key"])
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=10,
+            created_by=self.user,
+        )
+
+        client = OpenAlexHarvester(harvest=harvest, user=self.user)._get_client()
+        try:
+            self.assertEqual(
+                client.headers["Authorization"],
+                "Bearer openalex-test-key",
+            )
+        finally:
+            client.close()
+
+    def test_openalex_client_rejects_api_key_that_cannot_be_decrypted(self):
+        self.platform.encrypted_api_key = "encrypted-api-key"
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=10,
+            created_by=self.user,
+        )
+
+        with patch.object(Platform, "get_api_key", return_value=""):
+            with self.assertRaisesRegex(RuntimeError, "no se pudo descifrar"):
+                OpenAlexHarvester(
+                    harvest=harvest,
+                    user=self.user,
+                )._get_client()
+
     def test_openalex_harvester_creates_and_deduplicates_journals(self):
         # Simular respuestas de OpenAlex
         mock_response_1 = MagicMock(spec=httpx.Response)

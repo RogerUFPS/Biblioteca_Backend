@@ -4,10 +4,27 @@ from django.test import SimpleTestCase, override_settings
 
 import resend
 
-from apps.account.email import EmailDeliveryError, send_email
+from apps.account.email import EmailDeliveryError, login_link_html, send_email
 
 
 class ResendEmailTests(SimpleTestCase):
+    @override_settings(
+        FRONTEND_LOGIN_URL="https://repositorio-biblioteca-frontend.vercel.app/admin/login",
+    )
+    def test_credentials_email_login_link_uses_frontend_url(self):
+        self.assertEqual(
+            login_link_html(),
+            (
+                '<p><a href="https://repositorio-biblioteca-frontend.vercel.app/admin/login">'
+                "Iniciar sesión</a></p>"
+                "<p>https://repositorio-biblioteca-frontend.vercel.app/admin/login</p>"
+            ),
+        )
+
+    @override_settings(FRONTEND_LOGIN_URL='https://example.org/login?x="unsafe"')
+    def test_credentials_email_escapes_login_url_for_html(self):
+        self.assertIn('x=&quot;unsafe&quot;', login_link_html())
+
     @override_settings(
         RESEND_API_KEY="re_test_key",
         DEFAULT_FROM_EMAIL="Biblioteca <noreply@example.org>",

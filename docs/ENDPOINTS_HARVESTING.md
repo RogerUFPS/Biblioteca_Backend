@@ -148,6 +148,10 @@ pasa su validación, el Source se contabiliza en `records_failed`. No se envían
 los campos `active` ni `license`: el estado de publicación/validación se
 gestiona desde Journal y las licencias no se importan en este flujo; sus
 asociaciones se administran mediante el catálogo de licencias.
+OpenAlex exige una API key para paginar mediante cursor. Debe configurarse en
+la plataforma como `api_key`; el backend la envía en el encabezado de
+autorización. Si falta, la cosecha puede fallar al solicitar la siguiente
+página con un error `401`.
 
 | Método | Ruta | Request body | Respuesta |
 | --- | --- | --- | --- |
