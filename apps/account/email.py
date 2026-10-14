@@ -1,27 +1,23 @@
-import httpx
+import resend
 from django.conf import settings
+from requests import RequestException
 
 
 class EmailDeliveryError(Exception):
     pass
 
 
-def send_email(to, subject, text):
-    api_key = settings.RESEND_API_KEY
-    if not api_key:
+def send_email(to_email, subject, html_content):
+    if not settings.RESEND_API_KEY:
         raise EmailDeliveryError("El envío de correo no está configurado.")
+
+    resend.api_key = settings.RESEND_API_KEY
     try:
-        response = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "from": settings.RESEND_FROM_EMAIL,
-                "to": [to],
-                "subject": subject,
-                "text": text,
-            },
-            timeout=15,
-        )
-        response.raise_for_status()
-    except httpx.HTTPError as error:
-        raise EmailDeliveryError("No se pudo entregar el correo.") from error
+        return resend.Emails.send({
+            "from": settings.DEFAULT_FROM_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_content,
+        })
+    except (resend.exceptions.ResendError, RequestException) as error:
+        raise EmailDeliveryError(f"No se pudo entregar el correo: {error}") from error

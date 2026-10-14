@@ -322,8 +322,10 @@ correspondiente.
 
 ## Configuración de correo y creación del superadmin
 
-Configurar `RESEND_API_KEY`; opcionalmente establecer `RESEND_FROM_EMAIL` al
-remitente verificado de Resend. Después de aplicar migraciones:
+Configurar `RESEND_API_KEY` y `DEFAULT_FROM_EMAIL` con el remitente verificado
+en Resend. Si `DEFAULT_FROM_EMAIL` no está definido, también se acepta
+`RESEND_FROM_EMAIL`; su valor local predeterminado es `onboarding@resend.dev`.
+Después de aplicar migraciones:
 
 ```bash
 python manage.py migrate
