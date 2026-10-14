@@ -85,7 +85,6 @@ class PlatformAPITests(APITestCase):
             name=name,
             is_harvestable=True,
             base_api_url="https://api.test.org",
-            start_period="2000-01-01",
             valid_sintaxis=self.sintaxis,
             created_by=self.system,
         )
@@ -149,7 +148,6 @@ class PlatformAPITests(APITestCase):
                 "is_harvestable": True,
                 "base_api_url": "https://api.scopus.com",
                 "api_key": "raw_secret_key",
-                "start_period": "2010-01-01",
                 "valid_sintaxis": self.sintaxis.pk,
                 "institutions": [self.institution.pk],
             },
@@ -176,6 +174,8 @@ class PlatformAPITests(APITestCase):
         self.assertEqual(data["public_url"], "https://8.8.8.8/scopus")
         self.assertTrue(data["is_harvestable"])
         platform = models.Platform.objects.get(pk=data["id"])
+        self.assertEqual(platform.start_period, timezone.localdate())
+        self.assertIsNone(platform.finish_period)
         self.assertFalse(hasattr(platform, "public_url"))
         self.assertTrue(
             models.LinkCheckLog.objects.filter(
@@ -201,6 +201,22 @@ class PlatformAPITests(APITestCase):
         self.assertFalse(
             models.Platform.objects.get(pk=data["id"]).is_harvestable
         )
+
+    def test_api_rejects_manual_lifecycle_dates(self):
+        response = self.client.post(
+            "/api/platforms/",
+            {
+                "name": "Fechas manuales",
+                "public_url": "https://8.8.8.8/manual-dates",
+                "start_period": "2000-01-01",
+                "finish_period": "2001-01-01",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("start_period", response.data)
+        self.assertIn("finish_period", response.data)
 
     def test_create_platform_accepts_explicit_not_harvestable(self):
         response = self.client.post(
@@ -274,6 +290,7 @@ class PlatformAPITests(APITestCase):
         self.assertIsNone(
             data["validated_at"],
         )
+        self.assertIsNone(data["finish_period"])
 
     def test_public_endpoint_only_lists_published_platforms(self):
         """El endpoint publico solo debe retornar plataformas en estado PUBLICADO."""

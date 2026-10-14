@@ -102,7 +102,6 @@ class PlatformSerializersTests(TestCase):
             "is_harvestable": True,
             "base_api_url": "https://www.redalyc.org",
             "api_key": "my-plain-text-key",
-            "start_period": "2000-01-01",
             "valid_sintaxis": self.sintaxis.pk,
             "institutions": [self.institution.pk],
             "languages": [self.language.pk],
@@ -814,6 +813,22 @@ class PlatformSerializersTests(TestCase):
                 url="https://8.8.8.8/public",
             ).exists()
         )
+
+    def test_lifecycle_dates_are_read_only_and_reject_manual_input(self):
+        serializer = serializers.PlatformSerializer(
+            data={
+                "name": "Fechas administradas",
+                "public_url": "https://8.8.8.8/managed-dates",
+                "start_period": "2000-01-01",
+                "finish_period": "2001-01-01",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("start_period", serializer.errors)
+        self.assertIn("finish_period", serializer.errors)
+        self.assertTrue(serializer.fields["start_period"].read_only)
+        self.assertTrue(serializer.fields["finish_period"].read_only)
 
     def test_harvestable_platform_requires_base_api_url(self):
         serializer = serializers.PlatformSerializer(
