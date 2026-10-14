@@ -95,11 +95,21 @@ class OpenAlexHarvester:
     def _get_client(self) -> httpx.Client:
         if self._custom_client is not None:
             return self._custom_client
+        headers = {
+            "User-Agent": "UFPS-Harvester/1.0",
+            "Accept": "application/json",
+        }
+        api_key = self.harvest.platform.get_api_key()
+        if self.harvest.platform.encrypted_api_key and not api_key:
+            raise RuntimeError(
+                "La API key de la plataforma está configurada, pero no se pudo "
+                "descifrar. Verifica que PLATFORM_ENCRYPTION_KEY o "
+                "DJANGO_SECRET_KEY sea el mismo que se usó al guardarla."
+            )
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         return httpx.Client(
-            headers={
-                "User-Agent": "UFPS-Harvester/1.0",
-                "Accept": "application/json",
-            },
+            headers=headers,
             timeout=30.0,
         )
 
