@@ -2,16 +2,8 @@
 
 Estas pruebas documentan y validan el comportamiento integral del módulo `platforms` sin autenticación obligatoria del cliente, utilizando el usuario del sistema con `code=0`.
 
-Estado de validación: **30 pruebas ejecutadas y aprobadas al 100%** dentro del contenedor Docker con PostgreSQL.
-
-```text
-Found 30 test(s).
-System check identified no issues (0 silenced).
-[30 pruebas aprobadas]
-----------------------------------------------------------------------
-Ran 30 tests
-OK
-```
+**Cobertura actual: 47 pruebas** distribuidas entre modelos, serializadores,
+servicios, clasificación y API.
 
 ---
 
@@ -23,6 +15,8 @@ Durante la evolución de la Fase A se ajustaron varias reglas de negocio importa
 
 - La `api_key` es **opcional**.
 - `base_api_url` es **opcional**.
+- `is_harvestable` es `False` por defecto y solo se habilita mediante un valor
+  `true` explícito con una configuración válida.
 - Una plataforma puede existir únicamente como referencia pública, sin mecanismos de cosecha.
 - Una plataforma puede tener `base_api_url` sin `api_key`, por ejemplo cuando la API no requiere autenticación.
 - No se permite configurar una `api_key` cuando no existe `base_api_url`, porque la clave quedaría asociada a una API inexistente.
@@ -51,29 +45,30 @@ Por tanto:
 
 ### 1.3. Programas académicos y áreas del conocimiento
 
-Las `knowledge_areas` **no deben ser introducidas manualmente por el usuario** como clasificación independiente de la plataforma.
+`academic_programs` y `knowledge_areas` son relaciones derivadas y de solo
+lectura en Platform. No deben ser introducidas manualmente por el usuario.
 
 La clasificación se obtiene mediante:
 
 ```text
-AcademicProgram
-        │
-        ▼
-SharedAcademicProgramKnowledgeArea
-        │
-        ▼
-KnowledgeArea
-        │
-        ▼
-SharedPlatformKnowledgeArea
+Journal elegible → SharedJournalAcademicProgram → AcademicProgram
+                                                   │
+                                                   ▼
+                              SharedAcademicProgramKnowledgeArea
+                                                   │
+                                                   ▼
+                                             KnowledgeArea
+
+Platform → SharedPlatformAcademicProgram / SharedPlatformKnowledgeArea
 ```
 
-El administrador o usuario autorizado selecciona los `academic_programs` asociados a la plataforma y el sistema deriva automáticamente las `knowledge_areas` correspondientes.
+Los `academic_programs` se obtienen de las Journals elegibles asociadas y las
+`knowledge_areas` se derivan de esos programas.
 
 Esto permite:
 
 - Evitar inconsistencias entre programas académicos y áreas del conocimiento.
-- Evitar que el usuario asigne manualmente áreas que no correspondan a los programas seleccionados.
+- Evitar que el usuario asigne manualmente programas o áreas a Platform.
 - Consolidar áreas repetidas cuando varios programas comparten la misma área.
 - Mantener la clasificación de la plataforma sincronizada con la relación académica existente.
 
@@ -109,29 +104,37 @@ Una plataforma que no tenga API de cosecha puede publicarse siempre que cumpla l
 
 ### 2.2. Serializadores (`apps/platforms/tests/test_serializers.py`)
 
-Los tests del serializador verifican, entre otros aspectos:
-
-| Comportamiento | Resultado Esperado |
+| Prueba | Resultado Esperado |
 | --- | --- |
-| Creación de plataforma con API Key | La clave se almacena cifrada y nunca se expone como `encrypted_api_key` en la respuesta. |
-| API Key nula | Se permite crear una plataforma sin API Key. |
-| `base_api_url` nula | Se permite una plataforma sin API para casos de referencia o plataformas que no serán cosechadas. |
-| API Key sin `base_api_url` | Se rechaza la configuración porque la API Key no puede quedar asociada a una API inexistente. |
-| `base_api_url` sin API Key | Se permite cuando la API es pública o no requiere autenticación. |
-| Programas académicos | Se sincronizan mediante IDs proporcionados por el usuario autorizado. |
-| Áreas del conocimiento | Se derivan automáticamente de los programas académicos relacionados. |
-| Áreas duplicadas | Se consolidan sin generar relaciones duplicadas. |
-| `academic_programs` omitido en un `PATCH` | Se conservan las relaciones existentes. |
-| `academic_programs: []` | Se eliminan las relaciones de programas y las áreas derivadas correspondientes. |
-| `knowledge_areas` | No se utiliza como entrada manual para clasificar la plataforma. |
-| Restauración de plataforma archivada | Una plataforma eliminada que se recrea conforme a las reglas del servicio vuelve a `BORRADOR` y limpia la validación previa. |
-| Serializer público | No expone información sensible ni campos internos de auditoría. |
+| `test_platform_serializer_create_with_api_key_and_relations` | Crea una Platform cosechable, cifra la clave y sincroniza las relaciones administrables. |
+| `test_platform_serializer_ignores_manual_academic_classification` | Ignora intentos de escribir la clasificación académica derivada. |
+| `test_platform_serializer_does_not_accept_knowledge_areas_as_input` | Mantiene `knowledge_areas` como relación derivada y de solo lectura. |
+| `test_platform_serializer_allows_null_api_key_without_base_api_url` | Permite una Platform no cosechable sin URL técnica ni credencial. |
+| `test_platform_serializer_allows_base_api_url_without_api_key` | Permite cosecha mediante una API que no necesita autenticación. |
+| `test_platform_serializer_rejects_api_key_without_base_api_url` | Rechaza una credencial sin URL técnica asociada. |
+| `test_platform_serializer_clears_api_key_when_sent_as_null` | Elimina la credencial cuando `api_key` se envía como `null`. |
+| `test_platform_serializer_rejects_removing_base_api_url_with_existing_api_key` | Impide retirar la URL técnica mientras se conserva una credencial. |
+| `test_platform_serializer_allows_removing_base_api_url_and_api_key_together` | Permite retirar conjuntamente la URL técnica y la credencial. |
+| `test_platform_serializer_patch_cannot_create_academic_relations` | Un `PATCH` no puede crear manualmente clasificación académica de Platform. |
+| `test_platform_serializer_empty_academic_programs_is_read_only` | Una lista vacía tampoco modifica los programas derivados. |
+| `test_sync_relations_deduplicates_repeated_ids` | Deduplica IDs en las relaciones administrables. |
+| `test_archived_platform_restored_via_serializer_resets_to_draft` | Restaura una Platform archivada en `BORRADOR` y limpia su validación. |
+| `test_public_serializer_excludes_sensitive_and_audit_fields` | La respuesta pública no expone credenciales, campos cifrados ni auditoría interna. |
+| `test_platform_urls_use_latest_non_deleted_general_log` | Obtiene `public_url` del último log general no eliminado. |
+| `test_public_url_is_a_virtual_writable_field` | Trata `public_url` como campo virtual escribible sin persistirlo en Platform. |
+| `test_harvestable_platform_requires_base_api_url` | Exige URL técnica cuando `is_harvestable=true`. |
+| `test_non_harvestable_platform_rejects_harvesting_configuration` | Rechaza URL técnica o credencial en una Platform no cosechable. |
+| `test_disabling_harvesting_clears_api_url_and_key` | Deshabilitar cosecha limpia la URL técnica y la credencial cifrada. |
+| `test_public_url_patch_preserves_history_without_duplicates` | Conserva el historial y evita duplicar la URL pública vigente. |
+| `test_platform_creation_rolls_back_if_public_url_log_fails` | Revierte la creación si no puede registrarse de forma segura la URL pública. |
 
 ### 2.3. Servicios y Lógica de Negocio (`apps/platforms/tests/test_services.py`)
 
 | Prueba | Resultado Esperado |
 | --- | --- |
 | `test_publish_platform_succeeds_when_complete` | Una plataforma completa, incluida su URL pública en `LinkCheckLog`, pasa a `PUBLICADO` y registra `validated_by` y `validated_at`. |
+| `test_non_harvestable_platform_can_be_published_without_api_url` | Una Platform no cosechable puede publicarse sin `base_api_url`. |
+| `test_harvestable_platform_cannot_be_published_without_api_url` | Una Platform cosechable no puede publicarse sin URL técnica. |
 | `test_publish_platform_fails_when_incomplete` | Lanza `ValidationError` detallando los campos o relaciones obligatorias que faltan. La ausencia de `base_api_url` por sí sola no genera error cuando no existe API Key. |
 | `test_lifecycle_transitions_obsolete_and_reactivate` | Transición controlada `BORRADOR` → `PUBLICADO` → `OBSOLETO` → `BORRADOR`, limpiando la validación al reactivar. |
 | `test_validate_safe_http_url_blocks_internal_and_private_ips` | Protección preventiva contra SSRF bloqueando `localhost`, `127.0.0.1` y rangos privados. |
@@ -146,12 +149,29 @@ Los tests del serializador verifican, entre otros aspectos:
 | `test_restore_action_resets_status_to_draft` | `POST /api/platforms/{id}/restore/` restaura una plataforma desde la papelera y fuerza `status = BORRADOR`, limpiando la validación previa. |
 | `test_public_endpoint_only_lists_published_platforms` | `GET /api/platforms/public/` solo expone plataformas con `status = PUBLICADO` e incluye el correlativo `item_number`. |
 | `test_public_filter_by_catalog_relations` | Se validan los filtros relacionales en singular, por ejemplo `?country=...`, respetando el estado activo de la relación y del catálogo. |
+| `test_create_platform_defaults_to_not_harvestable` | Un POST que omite `is_harvestable` persiste y devuelve `false`. |
+| `test_create_platform_accepts_explicit_not_harvestable` | Un POST con `is_harvestable=false` conserva explícitamente ese valor. |
+| `test_link_history_orders_checks_newest_first_and_pending_last` | El historial pagina después de ordenar las verificaciones más recientes y deja los registros sin verificar al final. |
+| `test_link_history_uses_created_at_and_id_as_tiebreakers` | Los empates de `last_check` se resuelven de forma determinística con `created_at` e identificador descendentes. |
+| `test_successful_check_is_consistent_with_history` | Un chequeo HTTP 200 coincide en la respuesta de la acción, el historial y `link_status`. |
+| `test_link_history_can_exclude_journal_urls` | El filtro `journal_platform__isnull=true` separa el historial general de las URLs contextuales de Journals. |
+
+### 2.5. Clasificación derivada (`apps/platforms/tests/test_classification.py`)
+
+| Prueba | Resultado Esperado |
+| --- | --- |
+| `test_uses_only_eligible_journals` | Solo las Journals activas, validadas, no eliminadas y con relación activa aportan clasificación. |
+| `test_incomplete_eligible_classification_moves_published_to_draft` | Una clasificación elegible incompleta devuelve una Platform publicada a `BORRADOR` y limpia su validación. |
 
 ---
 
 ## 3. Comportamiento de `LinkCheckLog`
 
 `LinkCheckLog` es el componente encargado de mantener el historial de verificación de las URLs públicas de las plataformas.
+
+Un log con `journal_platform=null` pertenece a la URL pública general de la
+Platform. Un log con `journal_platform` pertenece a la URL de una Journal
+dentro de esa Platform; en ese caso ambos FKs deben señalar la misma Platform.
 
 Cada verificación registra, entre otros datos:
 
@@ -256,20 +276,17 @@ Los serializers públicos no deben exponer:
 
 ## 6. Estado actual de la Fase A
 
-La suite integral de `platforms` fue ejecutada dentro del contenedor Docker utilizando PostgreSQL y `--keepdb`.
-
-Resultado:
+La suite actual contiene 47 pruebas:
 
 ```text
-Found 30 test(s).
-System check identified no issues (0 silenced).
-
-OK
+Modelos:           6
+Serializadores:   21
+Servicios:         7
+Clasificación:     2
+API:              11
+--------------------
+TOTAL:             47
 ```
-
-**Estado: APROBADO — 30/30 pruebas.**
-
-No se requirieron modificaciones de modelos ni migraciones como consecuencia de estas correcciones.
 
 ---
 
@@ -278,25 +295,25 @@ No se requirieron modificaciones de modelos ni migraciones como consecuencia de 
 Para ejecutar la suite completa de `platforms` dentro del contenedor Docker:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.platforms --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.platforms --keepdb
 ```
 
 Para ejecutar únicamente los tests de servicios:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.platforms.tests.test_services --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.platforms.tests.test_services --keepdb
 ```
 
 Para ejecutar únicamente los tests de API:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.platforms.tests.test_api --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.platforms.tests.test_api --keepdb
 ```
 
 Para ejecutar únicamente los tests de serializers:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec web python manage.py test apps.platforms.tests.test_serializers --keepdb
+docker compose -f docker/docker-compose.yml run --rm -e DJANGO_TESTING=true web python manage.py test apps.platforms.tests.test_serializers --keepdb
 ```
 
 La bandera `--keepdb` permite reutilizar la base de datos temporal de pruebas y evitar la recreación completa en cada ejecución, especialmente útil en el entorno PostgreSQL utilizado por el proyecto.
@@ -314,7 +331,7 @@ Las reglas principales verificadas son:
 - URL pública gestionada mediante `LinkCheckLog`.
 - Validación de enlaces.
 - Control de fallos consecutivos.
-- Clasificación mediante programas académicos.
+- Clasificación derivada de Journals elegibles mediante programas académicos.
 - Derivación automática de áreas del conocimiento.
 - Control del ciclo de vida de plataformas.
 - Publicación condicionada al cumplimiento de los requisitos.
@@ -323,4 +340,10 @@ Las reglas principales verificadas son:
 - Filtros y endpoints públicos.
 - Documentación de la API mediante Swagger/OpenAPI.
 
-**Resultado final: Fase A de `platforms` aprobada con 30/30 pruebas.**
+**Cobertura documentada: 47 pruebas para la Fase A de `platforms`.**
+## Fase estructural: URLs obligatorias y chequeo por Platform
+
+La creación administrativa exige `public_url` y comprueba que su registro sea
+atómico mediante `LinkCheckLog`. El endpoint `check-links` cubre la URL general
+y las URLs contextuales vigentes, ignora relaciones eliminadas y conserva los
+resultados independientes ante fallos parciales.
