@@ -2,6 +2,7 @@ from datetime import date
 
 from django.core.exceptions import FieldDoesNotExist
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase
 
@@ -37,27 +38,27 @@ class JournalStructuralModelTests(TestCase):
         )
         self.assertEqual(journal.license_links.count(), 2)
 
-    def test_context_period_must_be_contained_in_platform_period(self):
+    def test_relation_dates_follow_independent_lifecycle_rules(self):
         platform = Platform.objects.create(
-            name="Temporal", start_period=date(2020, 1, 1),
-            finish_period=date(2025, 12, 31), created_by=self.user,
+            name="Temporal", created_by=self.user,
         )
+        today = timezone.localdate()
         services.validate_journal_platform_period(
             platform=platform,
-            start_period=date(2020, 1, 1),
-            finish_period=date(2025, 12, 31),
+            start_period=today,
+            finish_period=None,
         )
         with self.assertRaises(ValidationError):
             services.validate_journal_platform_period(
                 platform=platform,
-                start_period=date(2019, 12, 31),
-                finish_period=date(2025, 1, 1),
+                start_period=date(2000, 1, 1),
+                finish_period=None,
             )
         with self.assertRaises(ValidationError):
             services.validate_journal_platform_period(
                 platform=platform,
-                start_period=date(2021, 1, 1),
-                finish_period=None,
+                start_period=today,
+                finish_period=date(2000, 1, 1),
             )
 
     def test_create_journal_requires_context_and_registers_url(self):
@@ -90,7 +91,7 @@ class JournalStructuralAPITests(APITestCase):
             is_superadmin=True,
         )
         cls.platform = Platform.objects.create(
-            name="API estructural", start_period=date(2020, 1, 1),
+            name="API estructural",
             created_by=cls.user,
         )
         cls.license_a = models.License.objects.create(name="CC BY", created_by=cls.user)
@@ -126,7 +127,6 @@ class JournalStructuralAPITests(APITestCase):
                 "platforms": [{
                     "platform": self.platform.pk,
                     "journal_url": "https://8.8.8.8/journal",
-                    "start_period": "2020-02-01",
                 }],
             },
             format="json",
@@ -139,6 +139,25 @@ class JournalStructuralAPITests(APITestCase):
             journal_platform=link,
             url="https://8.8.8.8/journal",
         ).exists())
+
+    def test_api_rejects_manual_relation_dates(self):
+        response = self.client.post(
+            "/api/journals/",
+            {
+                "issn": "9393-9394",
+                "title": "Fechas manuales",
+                "platforms": [{
+                    "platform": self.platform.pk,
+                    "journal_url": "https://8.8.8.8/manual-relation-dates",
+                    "start_period": "2020-01-01",
+                    "finish_period": "2021-01-01",
+                }],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("platforms", response.data)
 
     def test_publish_optionally_synchronizes_licenses(self):
         journal = models.Journal.objects.create(

@@ -2,6 +2,7 @@ from datetime import date
 
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.account.models import User
 from apps.catalog.models import (
@@ -315,18 +316,25 @@ class JournalModelsTests(TestCase):
         link = SharedJournalPlatform.objects.create(
             journal=journal,
             platform=self.platform,
-            start_period=date(2020, 1, 1),
-            finish_period=date(2026, 12, 31),
             has_full_text=True,
             created_by=self.system,
         )
 
         self.assertEqual(
             link.start_period,
-            date(2020, 1, 1),
+            timezone.localdate(),
         )
         self.assertEqual(
             link.finish_period,
-            date(2026, 12, 31),
+            None,
         )
         self.assertTrue(link.has_full_text)
+
+        original_start = link.start_period
+        link.soft_delete(self.system, "Fin de la vinculación")
+        self.assertEqual(link.start_period, original_start)
+        self.assertEqual(link.finish_period, timezone.localdate())
+
+        link.restore()
+        self.assertEqual(link.start_period, original_start)
+        self.assertIsNone(link.finish_period)
