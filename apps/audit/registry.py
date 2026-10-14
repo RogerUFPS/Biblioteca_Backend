@@ -86,7 +86,7 @@ def register_auditlog_models():
         (ScheduleEvent, {}),
         (Harvest, {}),
 
-        # Usuarios (se excluye la contraseña por seguridad)
+        # Usuarios (se excluye la contraseña y session_key por seguridad)
         (User, {"exclude_fields": ["password", "session_key"]}),
     ]
 
