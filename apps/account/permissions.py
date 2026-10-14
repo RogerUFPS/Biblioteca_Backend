@@ -64,6 +64,7 @@ PERMISSION_MATRIX = {
                 "view",
                 "update",
                 "delete",
+                "restore",
                 "invite",
                 "manage_permissions",
             )

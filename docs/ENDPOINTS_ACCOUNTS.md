@@ -156,6 +156,12 @@ cuentas.
 
 Permiso `view`. Sin cuerpo. Respuesta `200`: lista de objetos de usuario.
 
+### `GET /users/archived/`
+
+Permiso `view`. Sin cuerpo. Respuesta `200`: lista de cuentas eliminadas
+lógicamente. El `id` de cada cuenta se usa para recuperarla con
+`POST /users/{id}/restore/`.
+
 ### `POST /users/invite/`
 
 Permiso `invite`. Requeridos: `email`. Opcionales: `full_name`,
@@ -199,6 +205,13 @@ esta ruta.
 Permiso `delete`. Sin cuerpo. Desactiva la cuenta e invalida su sesión.
 Respuesta `204`; cuenta inexistente responde `404`. No se puede desactivar al
 superadmin.
+
+### `POST /users/{id}/restore/`
+
+Permiso `restore`. Sin cuerpo. Restaura una cuenta eliminada lógicamente y la
+deja activa. Respuesta `200`: objeto de usuario actualizado. Si la cuenta ya
+está activa responde `400`; si no existe responde `404`. No se puede restaurar
+al superadmin mediante esta ruta.
 
 ### `PUT /users/{id}/permissions/`
 
@@ -309,7 +322,7 @@ usar su nombre como clave y un booleano como valor.
   `run_due`
 - `harvesting.events`: `view`
 - `harvesting.harvests`: `view`, `pause`, `resume`
-- `accounts.users`: `view`, `update`, `delete`, `invite`,
+- `accounts.users`: `view`, `update`, `delete`, `restore`, `invite`,
   `manage_permissions`
 - `accounts.presets`: `view`, `create`, `update`, `delete`
 - `accounts.permissions`: `view`
