@@ -22,7 +22,6 @@ from apps.platforms.models import LinkCheckLog, Platform
 
 from . import models
 from .services import (
-    validate_journal_platform_period,
     validate_platform_for_journal_association,
 )
 
@@ -205,13 +204,21 @@ class JournalPlatformRelationSerializer(
     )
 
     start_period = serializers.DateField(
-        required=False,
         allow_null=True,
+        read_only=True,
+        help_text=(
+            "Fecha de vinculación con la plataforma. "
+            "Es administrada automáticamente por el sistema."
+        ),
     )
 
     finish_period = serializers.DateField(
-        required=False,
         allow_null=True,
+        read_only=True,
+        help_text=(
+            "Fecha de finalización de la vinculación. "
+            "Es administrada automáticamente por el sistema."
+        ),
     )
 
     has_full_text = serializers.BooleanField(
@@ -234,6 +241,16 @@ class JournalPlatformRelationSerializer(
             field_name="journal_url",
         )
         return value
+
+    def to_internal_value(self, data):
+        managed_fields = {
+            field: "Es administrado automáticamente por el sistema."
+            for field in ("start_period", "finish_period")
+            if field in data
+        }
+        if managed_fields:
+            raise serializers.ValidationError(managed_fields)
+        return super().to_internal_value(data)
 
     def validate(self, attrs):
         platform = attrs.get("platform")
@@ -380,10 +397,6 @@ class JournalSerializer(
             )
         )
 
-        self._validate_platform_periods(
-            attrs.get("platforms")
-        )
-
         if base_instance is None and not attrs.get("platforms"):
             raise serializers.ValidationError({
                 "platforms": "Una revista nueva requiere al menos una plataforma."
@@ -434,84 +447,6 @@ class JournalSerializer(
         relaciones se modifica.
         """
         return self._extract_relation_data(validated_data)
-
-    def _validate_platform_periods(self, platform_data):
-        """
-        Valida los períodos efectivos de las relaciones Journal
-        <-> Platform.
-
-        En una actualización parcial, si solo se envía uno de los
-        períodos, el otro se obtiene de la relación existente.
-
-        También funciona cuando una revista archivada está siendo
-        restaurada, utilizando su relación archivada como referencia.
-        """
-        if not platform_data:
-            return
-
-        base_instance = (
-            self.instance
-            or getattr(
-                self,
-                "_archived_instance",
-                None,
-            )
-        )
-
-        existing_links = {}
-        if base_instance is not None:
-            existing_links = {
-                link.platform_id: link
-                for link in (
-                    models.SharedJournalPlatform.all_objects
-                    .filter(journal=base_instance)
-                )
-            }
-
-        errors = []
-
-        for item in platform_data:
-            platform_id = item["platform"].pk
-            existing_link = existing_links.get(platform_id)
-
-            effective_start = item.get(
-                "start_period",
-                getattr(
-                    existing_link,
-                    "start_period",
-                    None,
-                ),
-            )
-
-            effective_finish = item.get(
-                "finish_period",
-                getattr(
-                    existing_link,
-                    "finish_period",
-                    None,
-                ),
-            )
-
-            try:
-                validate_journal_platform_period(
-                    platform=item["platform"],
-                    start_period=effective_start,
-                    finish_period=effective_finish,
-                )
-            except serializers.ValidationError as exc:
-                errors.append(
-                    {
-                        "platform": platform_id,
-                        "detail": exc.detail,
-                    }
-                )
-
-        if errors:
-            raise serializers.ValidationError(
-                {
-                    "platforms": errors,
-                }
-            )
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
@@ -755,9 +690,11 @@ class JournalPublicPlatformSchemaSerializer(
     )
     start_period = serializers.DateField(
         allow_null=True,
+        read_only=True,
     )
     finish_period = serializers.DateField(
         allow_null=True,
+        read_only=True,
     )
     has_full_text = serializers.BooleanField()
 

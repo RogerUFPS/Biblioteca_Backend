@@ -1,6 +1,8 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Lower
+from django.utils import timezone
 
 from apps.catalog.models import (
     AcademicProgram,
@@ -306,6 +308,71 @@ class SharedJournalPlatform(AuditableModel):
 
     def __str__(self):
         return f"{self.journal} <-> {self.platform}"
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.start_period is None:
+            errors["start_period"] = "La fecha de vinculación es obligatoria."
+        if (
+            self.start_period is not None
+            and self.finish_period is not None
+            and self.finish_period < self.start_period
+        ):
+            errors["finish_period"] = (
+                "La fecha de finalización no puede ser anterior "
+                "a la fecha de vinculación."
+            )
+        if (
+            self.start_period is not None
+            and self.platform_id is not None
+            and self.platform.start_period is not None
+            and self.start_period < self.platform.start_period
+        ):
+            errors["start_period"] = (
+                "La fecha de vinculación no puede ser anterior "
+                "a la fecha de registro de la plataforma."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        today = timezone.localdate()
+        normalized_fields = []
+        if self._state.adding:
+            self.start_period = today
+            self.finish_period = None
+        elif self.start_period is None:
+            self.start_period = (
+                timezone.localtime(self.created_at).date()
+                if self.created_at is not None
+                else today
+            )
+            normalized_fields.append("start_period")
+
+        if not self._state.adding:
+            expected_finish = today if self.deleted_at is not None else None
+            if self.finish_period != expected_finish:
+                self.finish_period = expected_finish
+                normalized_fields.append("finish_period")
+
+        self.clean()
+        if normalized_fields and kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = list(dict.fromkeys([
+                *kwargs["update_fields"],
+                *normalized_fields,
+            ]))
+        return super().save(*args, **kwargs)
+
+    def soft_delete(self, user, explanation: str):
+        super().soft_delete(user=user, explanation=explanation)
+        self.finish_period = timezone.localdate()
+        self.save(update_fields=["finish_period"])
+
+    def restore(self):
+        super().restore()
+        self.finish_period = None
+        self.save(update_fields=["finish_period"])
 
 
 class SharedJournalLicense(AuditableModel):
