@@ -428,18 +428,32 @@ curl "http://localhost:8000/api/journals/?search=1476-4687"
 
 Filtros administrativos:
 
-```text
-editorial
-has_apc
-active
-```
+| Parámetro | Tipo | Ejemplo | Significado |
+|---|---|---|---|
+| `issn` | texto | `?issn=14764687` | Coincidencia exacta normalizada; admite ISSN con o sin guion. |
+| `title` | texto | `?title=biology` | Coincidencia parcial, sin distinguir mayúsculas. |
+| `editorial` | entero | `?editorial=1` | Editorial activa asociada. |
+| `language` | entero | `?language=1` | Idioma mediante relación activa. |
+| `country` | entero | `?country=1` | País mediante relación activa. |
+| `knowledge_area` | entero | `?knowledge_area=1` | Área derivada activa. |
+| `material_type` | entero | `?material_type=1` | Tipo de material mediante relación activa. |
+| `academic_program` | entero | `?academic_program=1` | Programa académico activo. |
+| `platform` | entero | `?platform=1` | Vinculación activa con una Platform no eliminada, sin restringir su estado administrativo. |
+| `license` | entero | `?license=1` | Licencia activa. |
+| `has_apc` | booleano | `?has_apc=false` | Presencia o ausencia de APC. |
+| `active` | booleano | `?active=true` | Actividad administrativa; no equivale por sí sola a publicación. |
+| `publication_date_from` | fecha ISO | `?publication_date_from=2020-01-01` | Fecha de publicación igual o posterior. |
+| `publication_date_to` | fecha ISO | `?publication_date_to=2020-12-31` | Fecha de publicación igual o anterior. |
 
-Ejemplos:
+Los filtros pueden combinarse:
 
 ```bash
-curl "http://localhost:8000/api/journals/?editorial=1"
-curl "http://localhost:8000/api/journals/?active=true"
+curl "http://localhost:8000/api/journals/?country=1&academic_program=4&has_apc=false"
 ```
+
+No existe un `publication_status` artificial. Una Journal publicada cumple
+simultáneamente `active=true`, `validated_at!=null` y `deleted_at=null`; para
+consultar exclusivamente esas fichas se utiliza `/api/journals/public/`.
 
 Ordenamiento disponible por:
 
@@ -462,20 +476,21 @@ curl "http://localhost:8000/api/journals/?ordering=-updated_at"
 
 Filtros disponibles:
 
-```text
-issn
-title
-editorial
-language
-country
-knowledge_area
-material_type
-academic_program
-platform
-has_apc
-publication_date_from
-publication_date_to
-```
+| Parámetro | Tipo | Ejemplo | Significado |
+|---|---|---|---|
+| `issn` | texto | `?issn=14764687` | Coincidencia exacta normalizada. |
+| `title` | texto | `?title=biology` | Coincidencia parcial. |
+| `editorial` | entero | `?editorial=1` | Editorial activa. |
+| `language` | entero | `?language=1` | Idioma con relación activa. |
+| `country` | entero | `?country=1` | País con relación activa. |
+| `knowledge_area` | entero | `?knowledge_area=1` | Área derivada activa. |
+| `material_type` | entero | `?material_type=1` | Tipo de material con relación activa. |
+| `academic_program` | entero | `?academic_program=1` | Programa académico activo. |
+| `platform` | entero | `?platform=1` | Vínculo activo con una Platform publicada y no eliminada. |
+| `license` | entero | `?license=1` | Licencia activa. |
+| `has_apc` | booleano | `?has_apc=false` | Presencia o ausencia de APC. |
+| `publication_date_from` | fecha ISO | `?publication_date_from=2020-01-01` | Fecha de publicación igual o posterior. |
+| `publication_date_to` | fecha ISO | `?publication_date_to=2020-12-31` | Fecha de publicación igual o anterior. |
 
 Ejemplos:
 
@@ -486,6 +501,7 @@ curl "http://localhost:8000/api/journals/public/?country=1"
 curl "http://localhost:8000/api/journals/public/?knowledge_area=1"
 curl "http://localhost:8000/api/journals/public/?academic_program=1"
 curl "http://localhost:8000/api/journals/public/?platform=1"
+curl "http://localhost:8000/api/journals/public/?license=1"
 curl "http://localhost:8000/api/journals/public/?has_apc=false"
 curl "http://localhost:8000/api/journals/public/?publication_date_from=2020-01-01"
 ```

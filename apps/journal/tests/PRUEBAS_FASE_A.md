@@ -239,3 +239,20 @@ el almacenamiento de la URL exclusivamente en `LinkCheckLog`.
 - Desactivar o publicar Journal no modifica las fechas de la relación.
 - Una Platform obsoleta puede conservar relaciones vigentes con
   `finish_period=null`.
+
+## Revisión de filtros — 14 de octubre de 2026
+
+`tests/test_filters.py` cubre los FilterSets administrativos y públicos:
+
+- `active=true` y `active=false` en administración;
+- ISSN normalizado, título, editorial y todos los catálogos relacionales;
+- `platform`, `license`, `has_apc` y rangos de `publication_date`;
+- combinación de varios parámetros;
+- exclusión de vínculos eliminados y de Platforms no publicadas en el endpoint
+  público;
+- ausencia de duplicados producidos por joins;
+- rechazo de números y fechas inválidas;
+- interacción entre filtro, `search`, `ordering`, `page` y `page_size`.
+
+No existe un filtro `publication_status`: `/public/` continúa siendo la fuente
+para consultar exclusivamente Journals activas, validadas y no eliminadas.
