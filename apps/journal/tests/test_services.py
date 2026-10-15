@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.account.models import User
@@ -24,12 +25,8 @@ class _JournalServicesTestAdapter:
     def create_journal(**kwargs):
         kwargs.pop("license", None)
         kwargs.pop("active", None)
-        start_period = kwargs.pop("start_period", None)
-        finish_period = kwargs.pop("finish_period", None)
-        if start_period is not None:
-            kwargs.setdefault("platform_start_period", start_period)
-        if finish_period is not None:
-            kwargs.setdefault("platform_finish_period", finish_period)
+        kwargs.pop("start_period", None)
+        kwargs.pop("finish_period", None)
         kwargs.setdefault("platform_id", Platform.objects.first().pk)
         compact_issn = str(kwargs.get("issn", "journal")).replace("-", "")
         kwargs.setdefault("journal_url", f"https://8.8.8.8/{compact_issn}")
@@ -565,23 +562,16 @@ class JournalServicesTests(TestCase):
     # PERIODOS
     # ==========================================================================
 
-    def test_create_journal_rejects_invalid_period(self):
-        """
-        El período final no puede ser anterior al inicial.
-        """
-        with self.assertRaises(ValidationError) as context:
-            services.create_journal(
+    def test_create_journal_does_not_accept_manual_periods(self):
+        with self.assertRaises(TypeError):
+            journal_services.create_journal(
                 issn="1122-3344",
                 title="Journal Period",
-                start_period=date(2026, 1, 1),
-                finish_period=date(2025, 1, 1),
+                platform_id=self.platform.pk,
+                journal_url="https://8.8.8.8/11223344",
+                platform_start_period=date(2026, 1, 1),
                 user=self.system,
             )
-
-        self.assertIn(
-            "platform_finish_period",
-            context.exception.detail,
-        )
 
     # ==========================================================================
     # PLATAFORMA DE PROCEDENCIA
@@ -596,8 +586,6 @@ class JournalServicesTests(TestCase):
             issn="2233-4455",
             title="Journal Platform",
             platform_id=self.platform.pk,
-            platform_start_period=date(2020, 1, 1),
-            platform_finish_period=date(2026, 12, 31),
             has_full_text=True,
             user=self.system,
         )
@@ -608,12 +596,12 @@ class JournalServicesTests(TestCase):
 
         self.assertEqual(
             link.start_period,
-            date(2020, 1, 1),
+            timezone.localdate(),
         )
 
         self.assertEqual(
             link.finish_period,
-            date(2026, 12, 31),
+            None,
         )
 
         self.assertTrue(
@@ -633,8 +621,6 @@ class JournalServicesTests(TestCase):
             issn="3344-5566",
             title="Journal Platform Update",
             platform_id=self.platform.pk,
-            platform_start_period=date(2020, 1, 1),
-            platform_finish_period=date(2024, 12, 31),
             has_full_text=False,
             user=self.system,
         )
@@ -643,7 +629,6 @@ class JournalServicesTests(TestCase):
             issn="3344-5566",
             title="Journal Platform Update",
             platform_id=self.platform.pk,
-            platform_start_period=date(2021, 1, 1),
             has_full_text=True,
             user=self.system,
         )
@@ -654,12 +639,12 @@ class JournalServicesTests(TestCase):
 
         self.assertEqual(
             link.start_period,
-            date(2021, 1, 1),
+            timezone.localdate(),
         )
 
         self.assertEqual(
             link.finish_period,
-            date(2024, 12, 31),
+            None,
         )
 
         self.assertTrue(
@@ -675,8 +660,6 @@ class JournalServicesTests(TestCase):
             issn="4455-6677",
             title="Journal Restore Platform",
             platform_id=self.platform.pk,
-            platform_start_period=date(2020, 1, 1),
-            platform_finish_period=date(2024, 12, 31),
             user=self.system,
         )
 
@@ -688,6 +671,8 @@ class JournalServicesTests(TestCase):
             user=self.system,
             explanation="Eliminada para prueba",
         )
+        original_start = link.start_period
+        self.assertEqual(link.finish_period, timezone.localdate())
         self.platform.status = Platform.Status.BORRADOR
         self.platform.validated_by = None
         self.platform.validated_at = None
@@ -699,8 +684,6 @@ class JournalServicesTests(TestCase):
             issn="4455-6677",
             title="Journal Restore Platform",
             platform_id=self.platform.pk,
-            platform_start_period=date(2021, 1, 1),
-            platform_finish_period=date(2026, 12, 31),
             has_full_text=True,
             user=self.system,
         )
@@ -713,12 +696,12 @@ class JournalServicesTests(TestCase):
 
         self.assertEqual(
             link.start_period,
-            date(2021, 1, 1),
+            original_start,
         )
 
         self.assertEqual(
             link.finish_period,
-            date(2026, 12, 31),
+            None,
         )
 
         self.assertTrue(
@@ -727,24 +710,16 @@ class JournalServicesTests(TestCase):
         self.platform.refresh_from_db()
         self.assertEqual(self.platform.status, Platform.Status.BORRADOR)
 
-    def test_source_platform_rejects_invalid_period(self):
-        """
-        Rechaza una relación con período de plataforma inválido.
-        """
-        with self.assertRaises(ValidationError) as context:
-            services.create_journal(
+    def test_source_platform_rejects_manual_period(self):
+        with self.assertRaises(TypeError):
+            journal_services.create_journal(
                 issn="5566-7788",
                 title="Journal Invalid Platform Period",
                 platform_id=self.platform.pk,
+                journal_url="https://8.8.8.8/55667788",
                 platform_start_period=date(2026, 1, 1),
-                platform_finish_period=date(2025, 1, 1),
                 user=self.system,
             )
-
-        self.assertIn(
-            "platform_finish_period",
-            context.exception.detail,
-        )
 
     def test_source_platform_rejects_invalid_platform(self):
         """

@@ -3,7 +3,9 @@ import django_filters  # type: ignore[import-untyped]
 from . import models
 
 
-class PlatformPublicFilter(django_filters.FilterSet):
+class PlatformBaseFilter(django_filters.FilterSet):
+    """Filtros relacionales y booleanos compartidos por Platform."""
+
     institution = django_filters.NumberFilter(method="filter_institution")
     country = django_filters.NumberFilter(method="filter_country")
     language = django_filters.NumberFilter(method="filter_language")
@@ -17,17 +19,7 @@ class PlatformPublicFilter(django_filters.FilterSet):
 
     class Meta:
         model = models.Platform
-        fields = [
-            "institution",
-            "country",
-            "language",
-            "knowledge_area",
-            "material_type",
-            "academic_program",
-            "requires_registration",
-            "has_access_text",
-            "is_harvestable",
-        ]
+        fields = []
 
     def filter_institution(self, queryset, name, value):
         return queryset.filter(
@@ -70,3 +62,32 @@ class PlatformPublicFilter(django_filters.FilterSet):
             academic_program_links__deleted_at__isnull=True,
             academic_program_links__academic_program__deleted_at__isnull=True,
         ).distinct()
+
+
+class PlatformFilter(PlatformBaseFilter):
+    """Filtros del listado administrativo de plataformas."""
+
+    status = django_filters.ChoiceFilter(
+        choices=models.Platform.Status.choices,
+    )
+    valid_sintaxis = django_filters.NumberFilter(
+        method="filter_valid_sintaxis",
+    )
+
+    class Meta:
+        model = models.Platform
+        fields = []
+
+    def filter_valid_sintaxis(self, queryset, name, value):
+        return queryset.filter(
+            valid_sintaxis_id=value,
+            valid_sintaxis__deleted_at__isnull=True,
+        )
+
+
+class PlatformPublicFilter(PlatformBaseFilter):
+    """Filtros de la exploración pública de plataformas publicadas."""
+
+    class Meta:
+        model = models.Platform
+        fields = []

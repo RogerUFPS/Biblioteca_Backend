@@ -151,7 +151,6 @@ class JournalSerializersTests(TestCase):
             "editorial": self.editorial.pk,
             "publication_date": "2020-01-01",
             "has_apc": False,
-            "start_period": "2020-01-01",
             "languages": [self.language.pk],
             "countries": [self.country.pk],
             "material_types": [self.material_type.pk],
@@ -162,8 +161,6 @@ class JournalSerializersTests(TestCase):
                 {
                     "platform": self.platform.pk,
                     "journal_url": "https://8.8.8.8/engineering",
-                    "start_period": "2021-01-01",
-                    "finish_period": "2026-12-31",
                     "has_full_text": True,
                 }
             ],
@@ -223,12 +220,12 @@ class JournalSerializersTests(TestCase):
 
         self.assertEqual(
             platform_link.start_period,
-            date(2021, 1, 1),
+            timezone.localdate(),
         )
 
         self.assertEqual(
             platform_link.finish_period,
-            date(2026, 12, 31),
+            None,
         )
 
         self.assertTrue(
@@ -499,8 +496,6 @@ class JournalSerializersTests(TestCase):
                 "platforms": [
                     {
                         "platform": self.platform.pk,
-                        "start_period": "2020-01-01",
-                        "finish_period": "2026-12-31",
                         "has_full_text": True,
                         "journal_url": "https://8.8.8.8/soft-delete",
                     }
@@ -669,8 +664,6 @@ class JournalSerializersTests(TestCase):
                 "platforms": [
                     {
                         "platform": self.platform.pk,
-                        "start_period": "2020-01-01",
-                        "finish_period": "2025-12-31",
                         "has_full_text": False,
                         "journal_url": "https://8.8.8.8/platform-update",
                     }
@@ -694,7 +687,6 @@ class JournalSerializersTests(TestCase):
                 "platforms": [
                     {
                         "platform": self.platform.pk,
-                        "start_period": "2021-01-01",
                         "has_full_text": True,
                     }
                 ]
@@ -717,19 +709,19 @@ class JournalSerializersTests(TestCase):
 
         self.assertEqual(
             link.start_period,
-            date(2021, 1, 1),
+            timezone.localdate(),
         )
 
         self.assertEqual(
             link.finish_period,
-            date(2025, 12, 31),
+            None,
         )
 
         self.assertTrue(
             link.has_full_text
         )
 
-    def test_platform_relation_rejects_invalid_period(self):
+    def test_platform_relation_rejects_manual_periods(self):
         """
         Rechaza una cobertura de plataforma con período invertido.
         """
@@ -770,8 +762,6 @@ class JournalSerializersTests(TestCase):
             models.SharedJournalPlatform.objects.create(
                 journal=journal,
                 platform=self.platform,
-                start_period=date(2020, 1, 1),
-                finish_period=date(2024, 12, 31),
                 has_full_text=False,
                 created_by=self.system,
             )
@@ -781,6 +771,7 @@ class JournalSerializersTests(TestCase):
             user=self.system,
             explanation="Eliminada para prueba",
         )
+        original_start = link.start_period
         self.platform.status = Platform.Status.BORRADOR
         self.platform.validated_by = None
         self.platform.validated_at = None
@@ -794,8 +785,6 @@ class JournalSerializersTests(TestCase):
                 "platforms": [
                     {
                         "platform": self.platform.pk,
-                        "start_period": "2021-01-01",
-                        "finish_period": "2026-12-31",
                         "has_full_text": True,
                         "journal_url": "https://8.8.8.8/restored-link",
                     }
@@ -821,12 +810,12 @@ class JournalSerializersTests(TestCase):
 
         self.assertEqual(
             link.start_period,
-            date(2021, 1, 1),
+            original_start,
         )
 
         self.assertEqual(
             link.finish_period,
-            date(2026, 12, 31),
+            None,
         )
 
         self.assertTrue(
@@ -847,11 +836,9 @@ class JournalSerializersTests(TestCase):
                 "platforms": [
                     {
                         "platform": self.platform.pk,
-                        "start_period": "2020-01-01",
                     },
                     {
                         "platform": self.platform.pk,
-                        "start_period": "2021-01-01",
                     },
                 ],
             }
@@ -1060,8 +1047,6 @@ class JournalSerializersTests(TestCase):
         models.SharedJournalPlatform.objects.create(
             journal=journal,
             platform=self.platform,
-            start_period=date(2020, 1, 1),
-            finish_period=date(2026, 12, 31),
             has_full_text=True,
             created_by=self.system,
         )
@@ -1131,8 +1116,8 @@ class JournalSerializersTests(TestCase):
                 "name": self.platform.name,
                 "public_url": None,
                 "journal_url": None,
-                "start_period": date(2020, 1, 1),
-                "finish_period": date(2026, 12, 31),
+                "start_period": timezone.localdate(),
+                "finish_period": None,
                 "has_full_text": True,
             },
         )

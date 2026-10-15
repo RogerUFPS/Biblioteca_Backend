@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Lower
+from django.utils import timezone
 
 from apps.core.models import AuditableModel
 from apps.core.utils.crypto import decrypt_api_key, encrypt_api_key
@@ -123,6 +124,50 @@ class Platform(AuditableModel):
 
     def __str__(self):
         return f"{self.name} ({self.get_status_display()})"
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.start_period is None:
+            errors["start_period"] = "La fecha de registro es obligatoria."
+        if (
+            self.start_period is not None
+            and self.finish_period is not None
+            and self.finish_period < self.start_period
+        ):
+            errors["finish_period"] = (
+                "La fecha de obsolescencia no puede ser anterior "
+                "a la fecha de registro."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        today = timezone.localdate()
+        normalized_start = False
+        if self._state.adding:
+            self.start_period = today
+            self.finish_period = None
+        elif self.start_period is None:
+            self.start_period = (
+                timezone.localtime(self.created_at).date()
+                if self.created_at is not None
+                else today
+            )
+            normalized_start = True
+
+        self.clean()
+        if normalized_start and kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = [
+                *kwargs["update_fields"],
+                "start_period",
+            ]
+        return super().save(*args, **kwargs)
+
+    def restore(self):
+        super().restore()
+        self.finish_period = None
+        self.save(update_fields=["finish_period"])
 
     def set_api_key(self, raw_key: str | None):
         """Cifra y asigna la API Key en el campo encrypted_api_key."""

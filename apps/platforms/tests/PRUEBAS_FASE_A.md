@@ -2,7 +2,7 @@
 
 Estas pruebas documentan y validan el comportamiento integral del módulo `platforms` sin autenticación obligatoria del cliente, utilizando el usuario del sistema con `code=0`.
 
-**Cobertura actual: 47 pruebas** distribuidas entre modelos, serializadores,
+**Cobertura actual: 50 pruebas** distribuidas entre modelos, serializadores,
 servicios, clasificación y API.
 
 ---
@@ -347,3 +347,26 @@ La creación administrativa exige `public_url` y comprueba que su registro sea
 atómico mediante `LinkCheckLog`. El endpoint `check-links` cubre la URL general
 y las URLs contextuales vigentes, ignora relaciones eliminadas y conserva los
 resultados independientes ante fallos parciales.
+# Fechas automáticas del ciclo de vida
+
+- `start_period` se asigna con la fecha local al crear la plataforma.
+- `finish_period` queda en `null` hasta `mark-obsolete`.
+- `reactivate` y restore limpian `finish_period` sin cambiar `start_period`.
+- POST, PUT y PATCH rechazan valores manuales para ambas fechas.
+- Publish no modifica ninguna de las dos fechas.
+
+## Revisión de filtros — 14 de octubre de 2026
+
+`tests/test_filters.py` cubre los FilterSets administrativos y públicos:
+
+- los tres valores reales de `status`: `borrador`, `publicado`, `obsoleto`;
+- booleanos de cosecha, registro y acceso a texto;
+- sintaxis e instituciones, países, idiomas, áreas, materiales y programas;
+- filtros combinados, `search`, `ordering`, `page` y `page_size`;
+- exclusión de relaciones eliminadas y ausencia de duplicados por joins;
+- rechazo de estados inválidos;
+- garantía de que `/public/` nunca devuelve Platforms no publicadas aunque
+  coincidan los demás filtros.
+
+El endpoint público no incorpora `status`, porque su queryset ya restringe el
+resultado a `PUBLICADO`.

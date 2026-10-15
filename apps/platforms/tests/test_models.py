@@ -1,6 +1,8 @@
 import datetime
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.account.models import User
 from apps.catalog.models import (
@@ -142,3 +144,18 @@ class PlatformModelsTests(TestCase):
                     country=country,
                     created_by=self.system,
                 )
+
+    def test_platform_dates_are_automatic_and_domain_validated(self):
+        platform = Platform.objects.create(
+            name="Fechas automáticas",
+            start_period=datetime.date(2000, 1, 1),
+            finish_period=datetime.date(2001, 1, 1),
+            created_by=self.system,
+        )
+
+        self.assertEqual(platform.start_period, timezone.localdate())
+        self.assertIsNone(platform.finish_period)
+
+        platform.finish_period = platform.start_period - datetime.timedelta(days=1)
+        with self.assertRaises(ValidationError):
+            platform.save(update_fields=["finish_period"])

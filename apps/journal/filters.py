@@ -5,7 +5,7 @@ from apps.platforms.models import Platform
 from . import models
 
 
-class JournalPublicFilter(django_filters.FilterSet):
+class JournalBaseFilter(django_filters.FilterSet):
     """
     Filtros disponibles para la exploración pública de revistas.
 
@@ -50,6 +50,10 @@ class JournalPublicFilter(django_filters.FilterSet):
         method="filter_platform",
     )
 
+    license = django_filters.NumberFilter(
+        method="filter_license",
+    )
+
     has_apc = django_filters.BooleanFilter(
         field_name="has_apc",
     )
@@ -63,6 +67,8 @@ class JournalPublicFilter(django_filters.FilterSet):
         field_name="publication_date",
         lookup_expr="lte",
     )
+
+    published_platforms_only = False
 
     class Meta:
         model = models.Journal
@@ -135,9 +141,41 @@ class JournalPublicFilter(django_filters.FilterSet):
         ).distinct()
 
     def filter_platform(self, queryset, name, value):
+        filters = {
+            "platform_links__platform_id": value,
+            "platform_links__deleted_at__isnull": True,
+            "platform_links__platform__deleted_at__isnull": True,
+        }
+        if self.published_platforms_only:
+            filters["platform_links__platform__status"] = (
+                Platform.Status.PUBLICADO
+            )
+
+        return queryset.filter(**filters).distinct()
+
+    def filter_license(self, queryset, name, value):
         return queryset.filter(
-            platform_links__platform_id=value,
-            platform_links__deleted_at__isnull=True,
-            platform_links__platform__deleted_at__isnull=True,
-            platform_links__platform__status=Platform.Status.PUBLICADO,
+            license_links__license_id=value,
+            license_links__deleted_at__isnull=True,
+            license_links__license__deleted_at__isnull=True,
         ).distinct()
+
+
+class JournalFilter(JournalBaseFilter):
+    """Filtros del listado administrativo de revistas."""
+
+    active = django_filters.BooleanFilter()
+
+    class Meta:
+        model = models.Journal
+        fields = []
+
+
+class JournalPublicFilter(JournalBaseFilter):
+    """Filtros de la exploración pública de revistas publicadas."""
+
+    published_platforms_only = True
+
+    class Meta:
+        model = models.Journal
+        fields = []
