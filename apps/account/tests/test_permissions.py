@@ -64,6 +64,24 @@ class ApplicationPermissionTests(SimpleTestCase):
             self.allowed("post", "/api/journals/7/publish/", user=user)
         )
 
+    def test_user_restore_requires_restore_permission(self):
+        permissions = {
+            "accounts": {"users": {"view": True, "delete": True}},
+        }
+        user = SimpleNamespace(
+            is_authenticated=True,
+            is_superadmin=False,
+            force_password_change=False,
+            effective_permissions=lambda: permissions,
+        )
+        self.assertFalse(
+            self.allowed("post", "/api/accounts/users/7/restore/", user=user)
+        )
+        permissions["accounts"]["users"]["restore"] = True
+        self.assertTrue(
+            self.allowed("post", "/api/accounts/users/7/restore/", user=user)
+        )
+
     def test_permissions_reject_unknown_actions_and_non_boolean_values(self):
         with self.assertRaises(ValueError):
             normalize_permissions({

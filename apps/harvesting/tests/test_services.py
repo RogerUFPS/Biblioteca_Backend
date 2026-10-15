@@ -6,7 +6,7 @@ import httpx
 
 from apps.account.models import User
 from apps.catalog.models import Country
-from apps.harvesting.models import Harvest, Schedule, ScheduleEvent
+from apps.harvesting.models import Harvest, HarvestJournal, Schedule, ScheduleEvent
 from apps.harvesting.services import (
     OpenAlexHarvester,
     _next_occurrence,
@@ -49,6 +49,39 @@ class HarvestingServicesTestCase(TestCase):
             self.assertEqual(client.headers["Accept"], "application/json")
         finally:
             client.close()
+
+    def test_openalex_client_sends_platform_api_key_as_bearer_token(self):
+        self.platform.set_api_key("openalex-test-key")
+        self.platform.save(update_fields=["encrypted_api_key"])
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=10,
+            created_by=self.user,
+        )
+
+        client = OpenAlexHarvester(harvest=harvest, user=self.user)._get_client()
+        try:
+            self.assertEqual(
+                client.headers["Authorization"],
+                "Bearer openalex-test-key",
+            )
+        finally:
+            client.close()
+
+    def test_openalex_client_rejects_api_key_that_cannot_be_decrypted(self):
+        self.platform.encrypted_api_key = "encrypted-api-key"
+        harvest = Harvest.objects.create(
+            platform=self.platform,
+            max_quantity=10,
+            created_by=self.user,
+        )
+
+        with patch.object(Platform, "get_api_key", return_value=""):
+            with self.assertRaisesRegex(RuntimeError, "no se pudo descifrar"):
+                OpenAlexHarvester(
+                    harvest=harvest,
+                    user=self.user,
+                )._get_client()
 
     def test_openalex_harvester_creates_and_deduplicates_journals(self):
         # Simular respuestas de OpenAlex
@@ -137,6 +170,13 @@ class HarvestingServicesTestCase(TestCase):
         self.assertFalse(j1.license_links.exists())
         self.assertTrue(j1.country_links.filter(country=country).exists())
         self.assertTrue(journal_platform)
+        self.assertTrue(
+            HarvestJournal.objects.filter(
+                harvest=harvest,
+                journal=j1,
+                result=HarvestJournal.Result.ADDED,
+            ).exists()
+        )
 
         # Probar deduplicación: Segunda cosecha con los mismos datos
         mock_response_dup = MagicMock(spec=httpx.Response)
@@ -173,6 +213,13 @@ class HarvestingServicesTestCase(TestCase):
         self.assertEqual(harvest_2.records_added, 0)
         self.assertEqual(harvest_2.records_updated, 1)
         self.assertEqual(harvest_2.api_cursor, "cursor_page_2")
+        self.assertTrue(
+            HarvestJournal.objects.filter(
+                harvest=harvest_2,
+                journal=j1,
+                result=HarvestJournal.Result.UPDATED,
+            ).exists()
+        )
 
         # No se duplicó el registro en la BD
         self.assertEqual(Journal.objects.filter(issn="1111-1111").count(), 1)

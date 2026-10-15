@@ -203,3 +203,31 @@ class Harvest(AuditableModel):
 
     def __str__(self):
         return f"Harvest #{self.pk} - {self.platform.name} [{self.get_state_display()}]"
+
+
+class HarvestJournal(models.Model):
+    class Result(models.TextChoices):
+        ADDED = "added", "Added"
+        UPDATED = "updated", "Updated"
+
+    harvest = models.ForeignKey(
+        Harvest,
+        on_delete=models.CASCADE,
+        related_name="journal_records",
+    )
+    journal = models.ForeignKey(
+        "journal.Journal",
+        on_delete=models.PROTECT,
+        related_name="harvest_records",
+    )
+    result = models.CharField(
+        max_length=10,
+        choices=Result.choices,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["journal__title", "journal_id"]
+
+    def __str__(self):
+        return f"Harvest #{self.harvest_id}: Journal #{self.journal_id} ({self.result})"

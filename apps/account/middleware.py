@@ -1,44 +1,31 @@
-from auditlog.models import LogEntry
-from django.contrib.contenttypes.models import ContentType
+from auditlog.context import disable_auditlog
 
-from .models import AccessPreset, User
+from .permissions import PUBLIC_ACCOUNT_PATHS
 
 
-class RequestAuditMiddleware:
-    """Registra cada solicitud de API sin guardar sus credenciales ni su cuerpo."""
+class AuditDisableForPublicMiddleware:
+    """
+    Deshabilita el registro de auditoría (django-auditlog) para los
+    endpoints públicos que no requieren autenticación.
+
+    Esto evita que operaciones como login, registro y recuperación de
+    contraseña generen entradas en la bitácora, ya que en esos flujos
+    el usuario aún no está autenticado y no existe un «actor» válido.
+
+    Las rutas cubiertas son las declaradas en PUBLIC_ACCOUNT_PATHS
+    del módulo de permisos:
+        - /api/accounts/auth/csrf/
+        - /api/accounts/auth/login/
+        - /api/accounts/register/
+        - /api/accounts/password/forgot/
+    """
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        response = self.get_response(request)
-        if request.path_info.startswith("/api/"):
-            actor = getattr(request, "user", None)
-            if not getattr(actor, "is_authenticated", False):
-                actor = None
-            resolver_match = getattr(request, "resolver_match", None)
-            view_class = getattr(
-                getattr(resolver_match, "func", None),
-                "cls",
-                None,
-            )
-            queryset = getattr(view_class, "queryset", None)
-            model = getattr(queryset, "model", None)
-            if model is None:
-                view_name = getattr(resolver_match, "view_name", "") or ""
-                model = AccessPreset if "preset" in view_name else User
-            LogEntry.objects.create(
-                action=LogEntry.Action.ACCESS,
-                content_type=ContentType.objects.get_for_model(model),
-                object_pk=str(getattr(resolver_match, "kwargs", {}).get("pk", "")),
-                object_repr=f"{request.method} {request.path_info}"[:200],
-                actor=actor,
-                remote_addr=request.META.get("REMOTE_ADDR"),
-                changes={
-                    "method": [None, request.method],
-                    "path": [None, request.path_info],
-                    "status": [None, response.status_code],
-                },
-                additional_data={"status_code": response.status_code},
-            )
-        return response
+        path = request.path_info.rstrip("/") + "/"
+        if path in PUBLIC_ACCOUNT_PATHS:
+            with disable_auditlog():
+                return self.get_response(request)
+        return self.get_response(request)

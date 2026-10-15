@@ -122,6 +122,11 @@ el cliente lo solicita explícitamente y proporciona una configuración válida.
 
 `api_key` es de solo escritura. El backend la almacena cifrada en `encrypted_api_key`, pero ni `api_key` ni `encrypted_api_key` aparecen en las respuestas.
 
+Para cosechas de OpenAlex que avanzan a páginas posteriores mediante cursor,
+OpenAlex requiere una API key. Configúrala en `api_key` al crear o actualizar
+la plataforma; el harvester la envía como token Bearer en el encabezado de
+autorización, sin incluirla en la URL.
+
 En un `PATCH`:
 
 - si `api_key` no se envía, se conserva la credencial actual;

@@ -40,8 +40,14 @@ DEFAULT_FROM_EMAIL = os.getenv(
     os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev"),
 )
 RESEND_FROM_EMAIL = DEFAULT_FROM_EMAIL
+FRONTEND_LOGIN_URL = os.getenv(
+    "FRONTEND_LOGIN_URL",
+    "https://repositorio-biblioteca-frontend.vercel.app/admin/login",
+)
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_AGE = 15 * 60
+SESSION_SAVE_EVERY_REQUEST = True
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SAMESITE = "None" if not DEBUG else "Lax"
 CSRF_COOKIE_SAMESITE = SESSION_COOKIE_SAMESITE

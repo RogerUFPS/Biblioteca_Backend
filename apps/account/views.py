@@ -12,7 +12,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .email import EmailDeliveryError, send_email
+from .email import EmailDeliveryError, login_link_html, send_email
 from .models import AccessPreset, SessionTermination, User
 from .permissions import PERMISSION_MATRIX
 from .serializers import (
@@ -183,6 +183,7 @@ class ForgotPasswordView(APIView):
                     "<p>Tu contraseña provisional es:</p>"
                     f"<p><strong>{escape(password)}</strong></p>"
                     "<p>Inicia sesión y cámbiala antes de continuar.</p>"
+                    f"{login_link_html()}"
                 ),
             )
         except EmailDeliveryError as error:
@@ -205,6 +206,14 @@ class ForgotPasswordView(APIView):
 class UsersView(APIView):
     def get(self, request):
         return Response(UserSerializer(User.objects.order_by("id"), many=True).data)
+
+
+class ArchivedUsersView(APIView):
+    def get(self, request):
+        users = User.all_objects.filter(
+            deleted_at__isnull=False,
+        ).order_by("id")
+        return Response(UserSerializer(users, many=True).data)
 
 
 class UserDetailView(APIView):
@@ -255,6 +264,40 @@ class UserDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class UserRestoreView(APIView):
+    @transaction.atomic
+    def post(self, request, pk):
+        user = User.all_objects.select_for_update().filter(pk=pk).first()
+        if user is None:
+            return Response({"detail": "Cuenta no encontrada."}, status=404)
+        if user.is_superadmin:
+            return Response(
+                {"detail": "No se puede restaurar la cuenta superadmin desde este endpoint."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if user.deleted_at is None and user.is_active:
+            return Response(
+                {"detail": "La cuenta ya está activa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.restore()
+        user.is_active = True
+        user.updated_by = request.user
+        user.updated_at = timezone.now()
+        user.session_key = None
+        user.save(update_fields=[
+            "is_active",
+            "deleted_by",
+            "deleted_at",
+            "delete_explanation",
+            "updated_by",
+            "updated_at",
+            "session_key",
+        ])
+        return Response(UserSerializer(user).data)
+
+
 class InviteView(APIView):
     def post(self, request):
         serializer = InviteSerializer(data=request.data)
@@ -279,6 +322,7 @@ class InviteView(APIView):
                         "<p>Tu contraseña provisional es:</p>"
                         f"<p><strong>{escape(password)}</strong></p>"
                         "<p>Inicia sesión y cámbiala antes de continuar.</p>"
+                        f"{login_link_html()}"
                     ),
                 )
             except EmailDeliveryError as error:

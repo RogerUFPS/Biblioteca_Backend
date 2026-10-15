@@ -10,6 +10,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.core.viewsets import AuditableViewSet, get_acting_user
+from apps.journal.models import Journal
+from apps.journal.serializers import JournalSerializer
 from . import filters, models, serializers
 from . import services
 
@@ -107,6 +109,30 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ["platform__name"]
     ordering_fields = ["created_at", "started_at", "finished_at", "records_added"]
     ordering = ["-created_at"]
+
+    @extend_schema(
+        summary="Listar revistas agregadas por una cosecha",
+        description=(
+            "Devuelve las revistas nuevas creadas por esta ejecución. "
+            "Las revistas actualizadas no se incluyen."
+        ),
+        request=None,
+        responses={200: JournalSerializer(many=True)},
+        tags=["Cosecha - Ejecuciones"],
+    )
+    @action(detail=True, methods=["get"], url_path="journals")
+    def journals(self, request, pk=None):
+        harvest = self.get_object()
+        journals = Journal.all_objects.filter(
+            harvest_records__harvest=harvest,
+            harvest_records__result=models.HarvestJournal.Result.ADDED,
+        ).distinct().order_by("title", "pk")
+        page = self.paginate_queryset(journals)
+        if page is not None:
+            return self.get_paginated_response(
+                JournalSerializer(page, many=True).data,
+            )
+        return Response(JournalSerializer(journals, many=True).data)
 
     @extend_schema(
         summary="Pausar una cosecha",

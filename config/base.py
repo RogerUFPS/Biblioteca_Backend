@@ -30,8 +30,8 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.account.middleware.AuditDisableForPublicMiddleware',
     'auditlog.middleware.AuditlogMiddleware',
-    "apps.account.middleware.RequestAuditMiddleware",
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

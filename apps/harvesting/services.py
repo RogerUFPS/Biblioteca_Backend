@@ -95,11 +95,21 @@ class OpenAlexHarvester:
     def _get_client(self) -> httpx.Client:
         if self._custom_client is not None:
             return self._custom_client
+        headers = {
+            "User-Agent": "UFPS-Harvester/1.0",
+            "Accept": "application/json",
+        }
+        api_key = self.harvest.platform.get_api_key()
+        if self.harvest.platform.encrypted_api_key and not api_key:
+            raise RuntimeError(
+                "La API key de la plataforma está configurada, pero no se pudo "
+                "descifrar. Verifica que PLATFORM_ENCRYPTION_KEY o "
+                "DJANGO_SECRET_KEY sea el mismo que se usó al guardarla."
+            )
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         return httpx.Client(
-            headers={
-                "User-Agent": "UFPS-Harvester/1.0",
-                "Accept": "application/json",
-            },
+            headers=headers,
             timeout=30.0,
         )
 
@@ -347,18 +357,28 @@ class OpenAlexHarvester:
         is_existing = Journal.all_objects.filter(issn__iexact=formatted_issn).exists()
 
         try:
-            create_journal(
-                issn=issn,
-                title=title,
-                user=self.user,
-                platform_id=harvest.platform_id,
-                journal_url=journal_url,
-                editorial_id=editorial_id,
-                url_image=url_image,
-                has_apc=has_apc,
-                country_ids=country_ids,
-                has_full_text=has_full_text,
-            )
+            with transaction.atomic():
+                journal = create_journal(
+                    issn=issn,
+                    title=title,
+                    user=self.user,
+                    platform_id=harvest.platform_id,
+                    journal_url=journal_url,
+                    editorial_id=editorial_id,
+                    url_image=url_image,
+                    has_apc=has_apc,
+                    country_ids=country_ids,
+                    has_full_text=has_full_text,
+                )
+                models.HarvestJournal.objects.create(
+                    harvest=harvest,
+                    journal=journal,
+                    result=(
+                        models.HarvestJournal.Result.UPDATED
+                        if is_existing
+                        else models.HarvestJournal.Result.ADDED
+                    ),
+                )
             if is_existing:
                 harvest.records_updated += 1
             else:

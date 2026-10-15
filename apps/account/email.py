@@ -1,3 +1,5 @@
+from html import escape
+
 import resend
 from django.conf import settings
 from requests import RequestException
@@ -5,6 +7,11 @@ from requests import RequestException
 
 class EmailDeliveryError(Exception):
     pass
+
+
+def login_link_html():
+    login_url = escape(settings.FRONTEND_LOGIN_URL, quote=True)
+    return f'<p><a href="{login_url}">Iniciar sesión</a></p><p>{login_url}</p>'
 
 
 def send_email(to_email, subject, html_content):
