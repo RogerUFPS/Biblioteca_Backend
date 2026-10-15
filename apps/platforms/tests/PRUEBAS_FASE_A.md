@@ -354,3 +354,19 @@ resultados independientes ante fallos parciales.
 - `reactivate` y restore limpian `finish_period` sin cambiar `start_period`.
 - POST, PUT y PATCH rechazan valores manuales para ambas fechas.
 - Publish no modifica ninguna de las dos fechas.
+
+## Revisión de filtros — 14 de octubre de 2026
+
+`tests/test_filters.py` cubre los FilterSets administrativos y públicos:
+
+- los tres valores reales de `status`: `borrador`, `publicado`, `obsoleto`;
+- booleanos de cosecha, registro y acceso a texto;
+- sintaxis e instituciones, países, idiomas, áreas, materiales y programas;
+- filtros combinados, `search`, `ordering`, `page` y `page_size`;
+- exclusión de relaciones eliminadas y ausencia de duplicados por joins;
+- rechazo de estados inválidos;
+- garantía de que `/public/` nunca devuelve Platforms no publicadas aunque
+  coincidan los demás filtros.
+
+El endpoint público no incorpora `status`, porque su queryset ya restringe el
+resultado a `PUBLICADO`.
