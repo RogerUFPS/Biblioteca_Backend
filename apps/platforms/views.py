@@ -299,13 +299,7 @@ class PlatformViewSet(AuditableViewSet):
         "name",
     ]
 
-    filterset_fields = [
-        "status",
-        "is_harvestable",
-        "requires_registration",
-        "has_access_text",
-        "valid_sintaxis",
-    ]
+    filterset_class = filters.PlatformFilter
 
     ordering_fields = [
         "name",
