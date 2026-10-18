@@ -121,6 +121,7 @@ class HarvestSerializer(serializers.ModelSerializer):
             "max_quantity",
             "stop_after_minutes",
             "api_cursor",
+            "api_marker",
             "state",
             "records_added",
             "records_updated",
