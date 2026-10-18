@@ -121,10 +121,21 @@ class Harvest(AuditableModel):
     )
 
     api_cursor = models.CharField(
-        max_length=500,
+        max_length=2000,
         blank=True,
         default="",
         help_text="Cursor o token de paginación proporcionado por la API de la plataforma. Gestionado automáticamente.",
+    )
+
+    api_marker = models.PositiveIntegerField(
+        default=0,
+        help_text="Índice del registro siguiente dentro de la respuesta XML pendiente.",
+    )
+
+    api_page = models.TextField(
+        blank=True,
+        default="",
+        help_text="Respuesta de página pendiente para continuar sin volver a solicitarla.",
     )
 
     max_quantity = models.PositiveIntegerField(

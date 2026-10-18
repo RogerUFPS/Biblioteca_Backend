@@ -1,21 +1,27 @@
 import logging
 import time
 import calendar
+import re
+import xml.etree.ElementTree as ElementTree
 from datetime import timedelta
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from django.db import transaction
 from django.utils import timezone
 import httpx
 
 from apps.account.models import User
-from apps.catalog.models import Country, Editorial
-from apps.journal.models import Journal
+from apps.catalog.models import Country, Editorial, Language, MaterialType
+from apps.journal.models import Journal, License, SharedJournalLicense
 from apps.journal.services import create_journal
 from apps.platforms.models import Platform
 from . import models
 
 logger = logging.getLogger(__name__)
+OAI_NAMESPACE = "http://www.openarchives.org/OAI/2.0/"
+DC_NAMESPACE = "http://purl.org/dc/elements/1.1/"
+ISSN_PATTERN = re.compile(r"^\s*(\d{4})-?(\d{3}[\dXx])\s*$")
 
 
 def get_latest_cursor_for_platform(platform: Platform) -> str:
@@ -36,6 +42,33 @@ def get_latest_cursor_for_platform(platform: Platform) -> str:
     if latest and latest.api_cursor:
         return latest.api_cursor
     return "*"
+
+
+def _is_doaj_platform(platform: Platform) -> bool:
+    base_url = (platform.base_api_url or "").lower()
+    platform_name = (platform.name or "").lower()
+    return "doaj" in platform_name or (
+        "doaj.org" in base_url and urlsplit(base_url).path.rstrip("/").endswith("/oai")
+    )
+
+
+def get_latest_harvest_progress(platform: Platform) -> dict[str, Any]:
+    """Return the provider-specific continuation data for a new scheduled Harvest."""
+    if not _is_doaj_platform(platform):
+        return {"api_cursor": get_latest_cursor_for_platform(platform)}
+
+    latest = (
+        models.Harvest.objects.filter(platform=platform)
+        .order_by("-created_at")
+        .first()
+    )
+    if latest is None:
+        return {"api_cursor": "", "api_marker": 0, "api_page": ""}
+    return {
+        "api_cursor": latest.api_cursor,
+        "api_marker": latest.api_marker,
+        "api_page": latest.api_page,
+    }
 
 
 def _source_has_apc(item: dict[str, Any]) -> bool | None:
@@ -388,7 +421,419 @@ class OpenAlexHarvester:
             harvest.records_failed += 1
 
 
-def get_harvester_for_platform(harvest: models.Harvest, **kwargs) -> OpenAlexHarvester:
+class DoajHarvester:
+    """Harvest DOAJ's OAI-PMH Dublin Core records, preserving incomplete pages."""
+
+    DEFAULT_OAI_URL = "https://doaj.org/oai"
+
+    def __init__(
+        self,
+        harvest: models.Harvest,
+        client: httpx.Client | None = None,
+        user: Any = None,
+    ):
+        self.harvest = harvest
+        self._custom_client = client
+        self.user = user or harvest.created_by or User.all_objects.get(code=0)
+
+    def _get_client(self) -> httpx.Client:
+        if self._custom_client is not None:
+            return self._custom_client
+        return httpx.Client(
+            headers={
+                "User-Agent": "UFPS-Harvester/1.0",
+                "Accept": "application/xml, text/xml",
+            },
+            timeout=60.0,
+        )
+
+    def _get_endpoint(self) -> str:
+        configured_url = self.harvest.platform.base_api_url or self.DEFAULT_OAI_URL
+        parsed_url = urlsplit(configured_url)
+        if not parsed_url.scheme or not parsed_url.netloc:
+            raise ValueError("La URL OAI-PMH configurada para DOAJ no es válida.")
+        return urlunsplit((parsed_url.scheme, parsed_url.netloc, parsed_url.path, "", ""))
+
+    @staticmethod
+    def _records_and_token(xml_payload: str):
+        try:
+            root = ElementTree.fromstring(xml_payload)
+        except ElementTree.ParseError as exc:
+            raise RuntimeError(f"DOAJ devolvió XML inválido: {exc}") from exc
+
+        if root.tag != f"{{{OAI_NAMESPACE}}}OAI-PMH":
+            raise RuntimeError("DOAJ devolvió una respuesta que no es OAI-PMH.")
+
+        error = root.find(f"{{{OAI_NAMESPACE}}}error")
+        if error is not None:
+            code = error.get("code", "unknown")
+            detail = (error.text or "").strip()
+            raise RuntimeError(f"Error OAI-PMH de DOAJ ({code}): {detail}")
+
+        list_records = root.find(f"{{{OAI_NAMESPACE}}}ListRecords")
+        if list_records is None:
+            raise RuntimeError("La respuesta OAI-PMH de DOAJ no contiene ListRecords.")
+
+        records = list_records.findall(f"{{{OAI_NAMESPACE}}}record")
+        token_element = list_records.find(f"{{{OAI_NAMESPACE}}}resumptionToken")
+        next_token = (token_element.text or "").strip() if token_element is not None else ""
+        return records, next_token
+
+    @staticmethod
+    def _dc_values(record, field: str) -> list[str]:
+        metadata = record.find(f"{{{OAI_NAMESPACE}}}metadata")
+        if metadata is None:
+            return []
+        dc_tag = f"{{{DC_NAMESPACE}}}{field}"
+        return [
+            text
+            for element in metadata.iter(dc_tag)
+            if (text := (element.text or "").strip())
+        ]
+
+    @staticmethod
+    def _record_issn(identifiers: list[str]) -> str | None:
+        for identifier in identifiers:
+            match = ISSN_PATTERN.fullmatch(identifier)
+            if match:
+                return f"{match.group(1)}-{match.group(2).upper()}"
+        return None
+
+    @staticmethod
+    def _journal_url(relations: list[str], identifiers: list[str], issn: str) -> str:
+        http_relations = [
+            relation
+            for relation in relations
+            if urlsplit(relation).scheme in {"http", "https"}
+            and urlsplit(relation).netloc
+        ]
+        preferred = [
+            relation
+            for relation in http_relations
+            if not any(
+                path_term in urlsplit(relation).path.lower()
+                for path_term in ("about", "submissions", "contact", "editorialteam")
+            )
+        ]
+        if preferred:
+            return preferred[0]
+        if http_relations:
+            return http_relations[0]
+
+        toc_url = next(
+            (
+                identifier
+                for identifier in identifiers
+                if identifier.startswith("https://doaj.org/toc/")
+            ),
+            None,
+        )
+        return toc_url or f"https://doaj.org/toc/{issn}"
+
+    def _get_editorial_id(self, publisher: str | None) -> int | None:
+        if not publisher:
+            return None
+        editorial, _ = Editorial.all_objects.get_or_create(
+            name=publisher.lower(),
+            defaults={"created_by": self.user},
+        )
+        if editorial.is_deleted:
+            editorial.restore()
+        return editorial.pk
+
+    def _sync_licenses(self, journal: Journal, rights: list[str]) -> None:
+        if not rights:
+            return
+
+        license_ids = set()
+        for right in dict.fromkeys(rights):
+            license_obj = License.all_objects.filter(name__iexact=right).first()
+            if license_obj is None:
+                license_obj = License.objects.create(
+                    name=right,
+                    created_by=self.user,
+                )
+            elif license_obj.is_deleted:
+                license_obj.restore()
+            license_ids.add(license_obj.pk)
+
+        current_links = SharedJournalLicense.objects.filter(journal=journal)
+        current_license_ids = set(current_links.values_list("license_id", flat=True))
+        for link in current_links.exclude(license_id__in=license_ids):
+            link.soft_delete(
+                user=self.user,
+                explanation="Licencia retirada del registro fuente DOAJ.",
+            )
+
+        for license_id in license_ids - current_license_ids:
+            archived_link = SharedJournalLicense.all_objects.filter(
+                journal=journal,
+                license_id=license_id,
+                deleted_at__isnull=False,
+            ).first()
+            if archived_link:
+                archived_link.restore()
+            else:
+                SharedJournalLicense.objects.create(
+                    journal=journal,
+                    license_id=license_id,
+                    created_by=self.user,
+                )
+
+    def _process_record(self, record) -> None:
+        harvest = self.harvest
+        header = record.find(f"{{{OAI_NAMESPACE}}}header")
+        if header is None or header.get("status") == "deleted":
+            harvest.records_failed += 1
+            logger.warning("Registro DOAJ eliminado o sin encabezado; se omite.")
+            return
+
+        identifiers = self._dc_values(record, "identifier")
+        issn = self._record_issn(identifiers)
+        titles = self._dc_values(record, "title")
+        title = titles[0] if titles else ""
+        if not issn or not title:
+            harvest.records_failed += 1
+            logger.warning(
+                "Registro DOAJ sin ISSN o título (identifier=%s).",
+                header.findtext(f"{{{OAI_NAMESPACE}}}identifier"),
+            )
+            return
+
+        languages = [
+            language.pk
+            for code in self._dc_values(record, "language")
+            if (
+                language := Language.objects.filter(
+                    abbreviation__iexact=code,
+                ).first()
+            )
+        ]
+        material_type_ids = [
+            material_type.pk
+            for value in self._dc_values(record, "type")
+            if (
+                material_type := MaterialType.objects.filter(
+                    name__iexact=value,
+                ).first()
+            )
+        ]
+        publisher_values = self._dc_values(record, "publisher")
+        editorial_id = self._get_editorial_id(publisher_values[0] if publisher_values else None)
+        journal_url = self._journal_url(
+            self._dc_values(record, "relation"),
+            identifiers,
+            issn,
+        )
+
+        existing_journal = Journal.all_objects.filter(issn__iexact=issn).first()
+        is_existing = existing_journal is not None
+        try:
+            with transaction.atomic():
+                journal = create_journal(
+                    issn=issn,
+                    title=title,
+                    user=self.user,
+                    platform_id=harvest.platform_id,
+                    journal_url=journal_url,
+                    editorial_id=editorial_id,
+                    language_ids=languages or None,
+                    material_type_ids=material_type_ids or None,
+                )
+                self._sync_licenses(journal, self._dc_values(record, "rights"))
+                models.HarvestJournal.objects.create(
+                    harvest=harvest,
+                    journal=journal,
+                    result=(
+                        models.HarvestJournal.Result.UPDATED
+                        if is_existing
+                        else models.HarvestJournal.Result.ADDED
+                    ),
+                )
+            if is_existing:
+                harvest.records_updated += 1
+            else:
+                harvest.records_added += 1
+        except Exception as exc:
+            logger.warning("Fallo al crear o actualizar revista DOAJ %s: %s", issn, exc)
+            harvest.records_failed += 1
+
+    def harvest_records(self) -> models.Harvest:
+        if not self.harvest.platform.is_harvestable:
+            raise ValueError(
+                f"La plataforma '{self.harvest.platform.name}' "
+                "no está habilitada para cosecha (is_harvestable=false)."
+            )
+
+        with transaction.atomic():
+            harvest = models.Harvest.objects.select_for_update().get(pk=self.harvest.pk)
+            if harvest.state != models.Harvest.State.PENDING:
+                return harvest
+            harvest.state = models.Harvest.State.RUNNING
+            if harvest.started_at is None:
+                harvest.started_at = timezone.now()
+            harvest.save(update_fields=["state", "started_at"])
+        self.harvest = harvest
+
+        client = None
+        should_close_client = self._custom_client is None
+        start_time = time.monotonic()
+
+        try:
+            endpoint = self._get_endpoint()
+            client = self._get_client()
+            while True:
+                harvest.refresh_from_db()
+                if harvest.state in {
+                    models.Harvest.State.CANCELLED,
+                    models.Harvest.State.PAUSING,
+                    models.Harvest.State.PAUSED,
+                }:
+                    break
+
+                elapsed_minutes = (
+                    harvest.elapsed_seconds + time.monotonic() - start_time
+                ) / 60
+                if (
+                    harvest.stop_after_minutes
+                    and elapsed_minutes >= harvest.stop_after_minutes
+                ):
+                    break
+
+                if not harvest.api_page:
+                    total_processed = (
+                        harvest.records_added
+                        + harvest.records_updated
+                        + harvest.records_failed
+                    )
+                    if harvest.max_quantity and total_processed >= harvest.max_quantity:
+                        break
+                    params = (
+                        {
+                            "verb": "ListRecords",
+                            "metadataPrefix": "oai_dc",
+                        }
+                        if not harvest.api_cursor
+                        else {
+                            "verb": "ListRecords",
+                            "resumptionToken": harvest.api_cursor,
+                        }
+                    )
+                    response = client.get(endpoint, params=params)
+                    if response.status_code != 200:
+                        raise RuntimeError(
+                            f"DOAJ respondió con código {response.status_code}: "
+                            f"{response.text[:200]}"
+                        )
+                    harvest.api_page = response.text
+                    harvest.api_marker = 0
+                    harvest.save(update_fields=["api_page", "api_marker"])
+
+                records, next_token = self._records_and_token(harvest.api_page)
+                if harvest.api_marker > len(records):
+                    raise RuntimeError(
+                        "El marcador del Harvest supera el número de registros "
+                        "de la respuesta DOAJ almacenada."
+                    )
+
+                while harvest.api_marker < len(records):
+                    harvest.refresh_from_db()
+                    if harvest.state in {
+                        models.Harvest.State.CANCELLED,
+                        models.Harvest.State.PAUSING,
+                        models.Harvest.State.PAUSED,
+                    }:
+                        break
+
+                    elapsed_minutes = (
+                        harvest.elapsed_seconds + time.monotonic() - start_time
+                    ) / 60
+                    if (
+                        harvest.stop_after_minutes
+                        and elapsed_minutes >= harvest.stop_after_minutes
+                    ):
+                        break
+
+                    with transaction.atomic():
+                        self._process_record(records[harvest.api_marker])
+                        harvest.api_marker += 1
+                        harvest.save(
+                            update_fields=[
+                                "api_marker",
+                                "records_added",
+                                "records_updated",
+                                "records_failed",
+                            ]
+                        )
+
+                if harvest.api_marker < len(records):
+                    break
+
+                harvest.api_cursor = next_token
+                harvest.api_marker = 0
+                harvest.api_page = ""
+                harvest.save(
+                    update_fields=["api_cursor", "api_marker", "api_page"],
+                )
+                total_processed = (
+                    harvest.records_added
+                    + harvest.records_updated
+                    + harvest.records_failed
+                )
+                if not next_token or (
+                    harvest.max_quantity and total_processed >= harvest.max_quantity
+                ):
+                    break
+
+            harvest.refresh_from_db()
+            elapsed_seconds = harvest.elapsed_seconds + int(time.monotonic() - start_time)
+            harvest.elapsed_seconds = elapsed_seconds
+            if harvest.state == models.Harvest.State.PAUSING:
+                harvest.state = models.Harvest.State.PAUSED
+                harvest.save(update_fields=["state", "elapsed_seconds"])
+            elif harvest.state != models.Harvest.State.PAUSED:
+                if harvest.state != models.Harvest.State.CANCELLED:
+                    harvest.state = models.Harvest.State.COMPLETED
+                harvest.finished_at = timezone.now()
+                harvest.save(
+                    update_fields=[
+                        "state",
+                        "finished_at",
+                        "elapsed_seconds",
+                        "api_cursor",
+                        "api_marker",
+                        "api_page",
+                        "records_added",
+                        "records_updated",
+                        "records_failed",
+                    ]
+                )
+        except Exception as exc:
+            logger.exception("Error durante la cosecha DOAJ #%s: %s", harvest.pk, exc)
+            harvest.state = models.Harvest.State.FAILED
+            harvest.error_message = str(exc)
+            harvest.finished_at = timezone.now()
+            harvest.elapsed_seconds += int(time.monotonic() - start_time)
+            harvest.save(
+                update_fields=[
+                    "state",
+                    "error_message",
+                    "finished_at",
+                    "elapsed_seconds",
+                ]
+            )
+            raise
+        finally:
+            if client is not None and should_close_client:
+                client.close()
+
+        return harvest
+
+
+def get_harvester_for_platform(
+    harvest: models.Harvest,
+    **kwargs,
+) -> OpenAlexHarvester | DoajHarvester:
     """
     Factoría que selecciona el recolector adecuado según la plataforma.
     """
@@ -401,12 +846,14 @@ def get_harvester_for_platform(harvest: models.Harvest, **kwargs) -> OpenAlexHar
     platform_name = (harvest.platform.name or "").lower()
     base_url = (harvest.platform.base_api_url or "").lower()
 
+    if _is_doaj_platform(harvest.platform):
+        return DoajHarvester(harvest, **kwargs)
     if "openalex" in platform_name or "openalex.org" in base_url:
         return OpenAlexHarvester(harvest, **kwargs)
 
     raise ValueError(
         f"No existe un motor de recolección configurado para la plataforma '{harvest.platform.name}'. "
-        f"Actualmente solo se encuentra implementado el proveedor OpenAlex."
+        "Actualmente se encuentran implementados los proveedores OpenAlex y DOAJ."
     )
 
 
@@ -461,7 +908,7 @@ def _run_schedule_event(event: models.ScheduleEvent) -> list[models.Harvest]:
                 platform=platform,
                 schedule=event.schedule,
                 event=event,
-                api_cursor=get_latest_cursor_for_platform(platform),
+                **get_latest_harvest_progress(platform),
                 max_quantity=event.schedule.max_quantity,
                 stop_after_minutes=event.schedule.stop_after_minutes,
                 created_by=event.schedule.created_by,
