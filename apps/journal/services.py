@@ -87,19 +87,20 @@ def validate_journal_platform_period(
     start_field: str = "start_period",
     finish_field: str = "finish_period",
 ) -> None:
-    """Valida que la cobertura contextual esté contenida en la Platform."""
+    """Valida las fechas del ciclo de vida de una vinculación."""
     errors = {}
+    if start_period is None:
+        errors[start_field] = "La fecha de vinculación es obligatoria."
     if start_period and finish_period and finish_period < start_period:
-        errors[finish_field] = "El período final no puede ser anterior al inicial."
+        errors[finish_field] = (
+            "La fecha de finalización no puede ser anterior "
+            "a la fecha de vinculación."
+        )
     if platform.start_period and start_period and start_period < platform.start_period:
-        errors[start_field] = "El período inicial no puede ser anterior al de la plataforma."
-    if platform.finish_period:
-        if finish_period is None:
-            errors[finish_field] = "Una plataforma cerrada no admite una cobertura abierta."
-        elif finish_period > platform.finish_period:
-            errors[finish_field] = "El período final no puede superar el de la plataforma."
-        if start_period and start_period > platform.finish_period:
-            errors[start_field] = "El período inicial no puede superar el fin de la plataforma."
+        errors[start_field] = (
+            "La fecha de vinculación no puede ser anterior "
+            "a la fecha de registro de la plataforma."
+        )
     if errors:
         raise ValidationError(errors)
 
@@ -299,8 +300,6 @@ def _sync_source_platform(
     *,
     journal: models.Journal,
     platform_id: int,
-    start_period: date | None,
-    finish_period: date | None,
     has_full_text: bool | None,
     user,
 ) -> models.SharedJournalPlatform:
@@ -308,8 +307,7 @@ def _sync_source_platform(
     Crea, actualiza o restaura la relación entre una revista
     y la plataforma desde la cual fue obtenida.
 
-    Esta relación se maneja separadamente porque contiene
-    atributos propios de cobertura.
+    Las fechas del ciclo de vida son administradas por el modelo.
     """
 
     platform = (
@@ -345,39 +343,7 @@ def _sync_source_platform(
     )
 
     if active_link:
-        effective_start = (
-            start_period
-            if start_period is not None
-            else active_link.start_period
-        )
-
-        effective_finish = (
-            finish_period
-            if finish_period is not None
-            else active_link.finish_period
-        )
-
-        validate_journal_platform_period(
-            platform=platform,
-            start_period=effective_start,
-            finish_period=effective_finish,
-            start_field="platform_start_period",
-            finish_field="platform_finish_period",
-        )
-
         update_fields = []
-
-        if start_period is not None:
-            active_link.start_period = start_period
-            update_fields.append(
-                "start_period"
-            )
-
-        if finish_period is not None:
-            active_link.finish_period = finish_period
-            update_fields.append(
-                "finish_period"
-            )
 
         if has_full_text is not None:
             active_link.has_full_text = has_full_text
@@ -417,33 +383,7 @@ def _sync_source_platform(
     )
 
     if archived_link:
-        effective_start = (
-            start_period
-            if start_period is not None
-            else archived_link.start_period
-        )
-
-        effective_finish = (
-            finish_period
-            if finish_period is not None
-            else archived_link.finish_period
-        )
-
-        validate_journal_platform_period(
-            platform=platform,
-            start_period=effective_start,
-            finish_period=effective_finish,
-            start_field="platform_start_period",
-            finish_field="platform_finish_period",
-        )
-
         archived_link.restore()
-
-        if start_period is not None:
-            archived_link.start_period = start_period
-
-        if finish_period is not None:
-            archived_link.finish_period = finish_period
 
         if has_full_text is not None:
             archived_link.has_full_text = has_full_text
@@ -453,8 +393,6 @@ def _sync_source_platform(
 
         archived_link.save(
             update_fields=[
-                "start_period",
-                "finish_period",
                 "has_full_text",
                 "updated_by",
                 "updated_at",
@@ -463,19 +401,9 @@ def _sync_source_platform(
 
         return archived_link
 
-    validate_journal_platform_period(
-        platform=platform,
-        start_period=start_period,
-        finish_period=finish_period,
-        start_field="platform_start_period",
-        finish_field="platform_finish_period",
-    )
-
     return models.SharedJournalPlatform.objects.create(
         journal=journal,
         platform=platform,
-        start_period=start_period,
-        finish_period=finish_period,
         has_full_text=(
             has_full_text
             if has_full_text is not None
@@ -501,8 +429,6 @@ def create_journal(
     country_ids: list[int] | None = None,
     material_type_ids: list[int] | None = None,
     academic_program_ids: list[int] | None = None,
-    platform_start_period: date | None = None,
-    platform_finish_period: date | None = None,
     has_full_text: bool | None = None,
 ) -> models.Journal:
     """
@@ -725,8 +651,6 @@ def create_journal(
     journal_platform = _sync_source_platform(
         journal=journal,
         platform_id=platform_id,
-        start_period=platform_start_period,
-        finish_period=platform_finish_period,
         has_full_text=has_full_text,
         user=user,
     )

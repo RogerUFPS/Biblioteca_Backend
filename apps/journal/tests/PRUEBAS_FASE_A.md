@@ -2,7 +2,7 @@
 
 Estas pruebas documentan y validan el comportamiento integral del módulo `journal` sin autenticación obligatoria del cliente, utilizando el usuario del sistema con `code=0`.
 
-**Cobertura actual: 85 pruebas** distribuidas entre modelos, serializadores,
+**Cobertura actual: 86 pruebas** distribuidas entre modelos, serializadores,
 servicios, clasificación y API.
 
 ---
@@ -231,3 +231,28 @@ contra el rango de su Platform. Journal expone `publication_date` y ya no posee
 También se cubren las licencias múltiples, su sincronización opcional durante
 `publish`, la obligatoriedad de Platform y `journal_url` en nuevas Journals, y
 el almacenamiento de la URL exclusivamente en `LinkCheckLog`.
+# Fechas automáticas de Journal ↔ Platform
+
+- Una relación nueva recibe `start_period` automático y `finish_period=null`.
+- El Soft Delete asigna `finish_period`; restore lo limpia sin cambiar el inicio.
+- POST, PUT y PATCH rechazan periodos enviados dentro de `platforms`.
+- Desactivar o publicar Journal no modifica las fechas de la relación.
+- Una Platform obsoleta puede conservar relaciones vigentes con
+  `finish_period=null`.
+
+## Revisión de filtros — 14 de octubre de 2026
+
+`tests/test_filters.py` cubre los FilterSets administrativos y públicos:
+
+- `active=true` y `active=false` en administración;
+- ISSN normalizado, título, editorial y todos los catálogos relacionales;
+- `platform`, `license`, `has_apc` y rangos de `publication_date`;
+- combinación de varios parámetros;
+- exclusión de vínculos eliminados y de Platforms no publicadas en el endpoint
+  público;
+- ausencia de duplicados producidos por joins;
+- rechazo de números y fechas inválidas;
+- interacción entre filtro, `search`, `ordering`, `page` y `page_size`.
+
+No existe un filtro `publication_status`: `/public/` continúa siendo la fuente
+para consultar exclusivamente Journals activas, validadas y no eliminadas.

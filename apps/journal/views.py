@@ -170,11 +170,7 @@ class JournalViewSet(AuditableViewSet):
         "issn",
     ]
 
-    filterset_fields = [
-        "editorial",
-        "has_apc",
-        "active",
-    ]
+    filterset_class = filters.JournalFilter
 
     ordering_fields = [
         "title",

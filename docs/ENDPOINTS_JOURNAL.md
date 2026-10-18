@@ -76,8 +76,6 @@ publication_date
 licenses
 url_image
 has_apc
-start_period
-finish_period
 languages
 countries
 material_types
@@ -159,8 +157,6 @@ El campo `platforms` recibe una lista con objetos de esta forma:
   {
     "platform": 1,
     "journal_url": "https://revista.ejemplo.org",
-    "start_period": "2020-01-01",
-    "finish_period": null,
     "has_full_text": true
   }
 ]
@@ -170,6 +166,12 @@ En las respuestas, cada relación incluye además:
 
 - `public_url`: URL general navegable de la plataforma, tomada del último `LinkCheckLog` no eliminado cuyo `journal_platform` es nulo.
 - `journal_url`: campo virtual obligatorio para relaciones nuevas y opcional al actualizar una relación existente. La URL se toma del último `LinkCheckLog` no eliminado asociado al `SharedJournalPlatform` correspondiente.
+- `start_period`: fecha de vinculación con la plataforma, asignada por el backend.
+- `finish_period`: fecha de finalización por Soft Delete, o `null` mientras la vinculación siga vigente.
+
+`start_period` y `finish_period` son de solo lectura. Si el cliente intenta
+enviarlos en `POST`, `PUT` o `PATCH`, la API responde HTTP 400. El Frontend no
+debe mostrar inputs editables para estas fechas.
 
 Una revista puede tener un `journal_url` distinto por plataforma. Ninguno de estos valores se obtiene de `base_api_url`, que está reservado para harvesting, ni se persiste en `Journal`, `Platform` o `SharedJournalPlatform`.
 
@@ -206,8 +208,7 @@ country_ids
 material_type_ids
 academic_program_ids
 platform_id
-platform_start_period
-platform_finish_period
+journal_url
 has_full_text
 ```
 
@@ -279,8 +280,7 @@ curl -X POST http://localhost:8000/api/journals/ \
     "academic_programs": [1],
     "platforms": [{
       "platform": 1,
-      "journal_url": "https://example.org/nature",
-      "start_period": "1869-11-04"
+      "journal_url": "https://example.org/nature"
     }]
   }'
 ```
@@ -304,8 +304,6 @@ curl -X POST http://localhost:8000/api/journals/ \
       {
         "platform": 1,
         "journal_url": "https://revista.ejemplo.org/",
-        "start_period": "2020-01-01",
-        "finish_period": null,
         "has_full_text": true
       }
     ]
@@ -430,26 +428,39 @@ curl "http://localhost:8000/api/journals/?search=1476-4687"
 
 Filtros administrativos:
 
-```text
-editorial
-has_apc
-active
-```
+| Parámetro | Tipo | Ejemplo | Significado |
+|---|---|---|---|
+| `issn` | texto | `?issn=14764687` | Coincidencia exacta normalizada; admite ISSN con o sin guion. |
+| `title` | texto | `?title=biology` | Coincidencia parcial, sin distinguir mayúsculas. |
+| `editorial` | entero | `?editorial=1` | Editorial activa asociada. |
+| `language` | entero | `?language=1` | Idioma mediante relación activa. |
+| `country` | entero | `?country=1` | País mediante relación activa. |
+| `knowledge_area` | entero | `?knowledge_area=1` | Área derivada activa. |
+| `material_type` | entero | `?material_type=1` | Tipo de material mediante relación activa. |
+| `academic_program` | entero | `?academic_program=1` | Programa académico activo. |
+| `platform` | entero | `?platform=1` | Vinculación activa con una Platform no eliminada, sin restringir su estado administrativo. |
+| `license` | entero | `?license=1` | Licencia activa. |
+| `has_apc` | booleano | `?has_apc=false` | Presencia o ausencia de APC. |
+| `active` | booleano | `?active=true` | Actividad administrativa; no equivale por sí sola a publicación. |
+| `publication_date_from` | fecha ISO | `?publication_date_from=2020-01-01` | Fecha de publicación igual o posterior. |
+| `publication_date_to` | fecha ISO | `?publication_date_to=2020-12-31` | Fecha de publicación igual o anterior. |
 
-Ejemplos:
+Los filtros pueden combinarse:
 
 ```bash
-curl "http://localhost:8000/api/journals/?editorial=1"
-curl "http://localhost:8000/api/journals/?active=true"
+curl "http://localhost:8000/api/journals/?country=1&academic_program=4&has_apc=false"
 ```
+
+No existe un `publication_status` artificial. Una Journal publicada cumple
+simultáneamente `active=true`, `validated_at!=null` y `deleted_at=null`; para
+consultar exclusivamente esas fichas se utiliza `/api/journals/public/`.
 
 Ordenamiento disponible por:
 
 ```text
 title
 issn
-start_period
-finish_period
+publication_date
 created_at
 updated_at
 fetched_at
@@ -465,20 +476,21 @@ curl "http://localhost:8000/api/journals/?ordering=-updated_at"
 
 Filtros disponibles:
 
-```text
-issn
-title
-editorial
-language
-country
-knowledge_area
-material_type
-academic_program
-platform
-has_apc
-publication_date_from
-publication_date_to
-```
+| Parámetro | Tipo | Ejemplo | Significado |
+|---|---|---|---|
+| `issn` | texto | `?issn=14764687` | Coincidencia exacta normalizada. |
+| `title` | texto | `?title=biology` | Coincidencia parcial. |
+| `editorial` | entero | `?editorial=1` | Editorial activa. |
+| `language` | entero | `?language=1` | Idioma con relación activa. |
+| `country` | entero | `?country=1` | País con relación activa. |
+| `knowledge_area` | entero | `?knowledge_area=1` | Área derivada activa. |
+| `material_type` | entero | `?material_type=1` | Tipo de material con relación activa. |
+| `academic_program` | entero | `?academic_program=1` | Programa académico activo. |
+| `platform` | entero | `?platform=1` | Vínculo activo con una Platform publicada y no eliminada. |
+| `license` | entero | `?license=1` | Licencia activa. |
+| `has_apc` | booleano | `?has_apc=false` | Presencia o ausencia de APC. |
+| `publication_date_from` | fecha ISO | `?publication_date_from=2020-01-01` | Fecha de publicación igual o posterior. |
+| `publication_date_to` | fecha ISO | `?publication_date_to=2020-12-31` | Fecha de publicación igual o anterior. |
 
 Ejemplos:
 
@@ -489,13 +501,15 @@ curl "http://localhost:8000/api/journals/public/?country=1"
 curl "http://localhost:8000/api/journals/public/?knowledge_area=1"
 curl "http://localhost:8000/api/journals/public/?academic_program=1"
 curl "http://localhost:8000/api/journals/public/?platform=1"
+curl "http://localhost:8000/api/journals/public/?license=1"
 curl "http://localhost:8000/api/journals/public/?has_apc=false"
 curl "http://localhost:8000/api/journals/public/?publication_date_from=2020-01-01"
 ```
 
 El filtro `platform` únicamente considera relaciones con plataformas que continúan en estado `PUBLICADO`.
 
-También admite `search` por título/ISSN y ordenamiento por `title`, `issn`, `start_period` y `finish_period`.
+También admite `search` por título/ISSN y ordenamiento por `title`, `issn`
+y `publication_date`.
 
 ## 9. Probar sin modificar la base de datos normal
 
@@ -588,8 +602,9 @@ validación.
 ## Contrato estructural vigente
 
 - `publication_date` es la fecha propia de publicación/origen de la revista.
-- Los periodos de cobertura existen exclusivamente en cada relación incluida en
-  `platforms` (`start_period` y `finish_period`).
+- `SharedJournalPlatform.start_period` es la fecha automática de vinculación y
+  `finish_period` es la fecha automática de Soft Delete. Ambas son de solo
+  lectura y se conservan en las respuestas por compatibilidad.
 - Toda relación nueva requiere `journal_url`; se registra en `LinkCheckLog` y no
   como columna de Journal o `SharedJournalPlatform`.
 - Una Journal nueva requiere al menos una Platform.
@@ -602,3 +617,7 @@ validación.
   licencias y registra la URL contextual de forma atómica.
 
 Pendiente: evaluar que una licencia sea obligatoria para publicar.
+
+Pendiente: evaluar eliminar `SharedJournalPlatform.start_period` y
+`SharedJournalPlatform.finish_period` si la auditoría (`created_at` y
+`deleted_at`) resulta suficiente como fuente temporal.

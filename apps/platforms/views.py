@@ -299,13 +299,7 @@ class PlatformViewSet(AuditableViewSet):
         "name",
     ]
 
-    filterset_fields = [
-        "status",
-        "is_harvestable",
-        "requires_registration",
-        "has_access_text",
-        "valid_sintaxis",
-    ]
+    filterset_class = filters.PlatformFilter
 
     ordering_fields = [
         "name",
@@ -351,7 +345,8 @@ class PlatformViewSet(AuditableViewSet):
         summary="Marcar plataforma como obsoleta",
         description=(
             "Cambia el estado de una plataforma a OBSOLETO. "
-            "La plataforma deja de considerarse publicada."
+            "La plataforma deja de considerarse publicada y el sistema "
+            "registra automáticamente su fecha de obsolescencia."
         ),
         request=None,
         responses={
@@ -382,7 +377,8 @@ class PlatformViewSet(AuditableViewSet):
         summary="Reactivar plataforma",
         description=(
             "Reactiva una plataforma previamente marcada como obsoleta "
-            "y la devuelve al estado BORRADOR para una nueva validación."
+            "y la devuelve al estado BORRADOR para una nueva validación. "
+            "La fecha de obsolescencia se limpia automáticamente."
         ),
         request=None,
         responses={

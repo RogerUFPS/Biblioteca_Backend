@@ -251,6 +251,23 @@ class PlatformSerializer(
         "de la plataforma."
     )
 
+    start_period = serializers.DateField(
+        read_only=True,
+        allow_null=True,
+        help_text=(
+            "Fecha de registro de la plataforma, administrada "
+            "automáticamente por el sistema."
+        ),
+    )
+    finish_period = serializers.DateField(
+        read_only=True,
+        allow_null=True,
+        help_text=(
+            "Fecha en que la plataforma fue marcada como obsoleta. "
+            "Es administrada automáticamente por el sistema."
+        ),
+    )
+
     api_key = serializers.CharField(
         write_only=True,
         required=False,
@@ -360,11 +377,23 @@ class PlatformSerializer(
         read_only_fields = [
             *AUDIT_FIELDS,
             "status",
+            "start_period",
+            "finish_period",
             "validated_by",
             "validated_at",
             "knowledge_areas",
             "academic_programs",
         ]
+
+    def to_internal_value(self, data):
+        managed_fields = {
+            field: "Es administrado automáticamente por el sistema."
+            for field in ("start_period", "finish_period")
+            if field in data
+        }
+        if managed_fields:
+            raise serializers.ValidationError(managed_fields)
+        return super().to_internal_value(data)
 
     def validate_public_url(self, value):
         services.validate_safe_http_url(value, field_name="public_url")

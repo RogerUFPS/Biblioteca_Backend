@@ -71,7 +71,6 @@ class PlatformServicesTests(TestCase):
             name="Plataforma Completa",
             is_harvestable=True,
             base_api_url="https://api.completa.org",
-            start_period="2000-01-01",
             valid_sintaxis=self.sintaxis,
             created_by=self.system,
         )
@@ -201,11 +200,6 @@ class PlatformServicesTests(TestCase):
         )
 
         self.assertIn(
-            "start_period",
-            errors,
-        )
-
-        self.assertIn(
             "valid_sintaxis",
             errors,
         )
@@ -223,6 +217,7 @@ class PlatformServicesTests(TestCase):
             platform=platform,
             user=self.system,
         )
+        original_start = platform.start_period
 
         obsolete = services.mark_platform_obsolete(
             platform=platform,
@@ -237,6 +232,8 @@ class PlatformServicesTests(TestCase):
         self.assertIsNotNone(
             obsolete.validated_by,
         )
+        self.assertEqual(obsolete.start_period, original_start)
+        self.assertEqual(obsolete.finish_period, timezone.localdate())
 
         reactivated = services.reactivate_platform(
             platform=platform,
@@ -255,6 +252,8 @@ class PlatformServicesTests(TestCase):
         self.assertIsNone(
             reactivated.validated_at,
         )
+        self.assertEqual(reactivated.start_period, original_start)
+        self.assertIsNone(reactivated.finish_period)
 
     def test_validate_safe_http_url_blocks_internal_and_private_ips(self):
         """Verifica que la validacion SSRF rechace localhost y redes privadas."""

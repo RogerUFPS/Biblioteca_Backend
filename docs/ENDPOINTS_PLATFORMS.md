@@ -73,8 +73,6 @@ is_harvestable
 base_api_url
 api_key
 url_image
-start_period
-finish_period
 requires_registration
 has_access_text
 valid_sintaxis
@@ -89,6 +87,8 @@ Los siguientes campos son de solo lectura o son controlados por el backend:
 ```text
 id
 status
+start_period
+finish_period
 validated_by
 validated_at
 knowledge_areas
@@ -302,7 +302,6 @@ curl -X POST http://localhost:8000/api/platforms/ \
     "name": "Repositorio institucional",
     "public_url": "https://repositorio.ejemplo.org",
     "is_harvestable": false,
-    "start_period": "2020-01-01",
     "requires_registration": false,
     "has_access_text": true,
     "valid_sintaxis": 1,
@@ -327,7 +326,6 @@ curl -X POST http://localhost:8000/api/platforms/ \
     "is_harvestable": true,
     "base_api_url": "https://api.ejemplo.org",
     "api_key": "clave-secreta",
-    "start_period": "2010-01-01",
     "valid_sintaxis": 1,
     "institutions": [1],
     "languages": [1],
@@ -461,18 +459,25 @@ curl "http://localhost:8000/api/platforms/?search=scopus"
 
 Filtros administrativos disponibles:
 
-```text
-status
-is_harvestable
-requires_registration
-has_access_text
-valid_sintaxis
-```
+| Parámetro | Tipo | Ejemplo | Significado |
+|---|---|---|---|
+| `status` | enum | `?status=publicado` | Estado real: `borrador`, `publicado` u `obsoleto`. |
+| `is_harvestable` | booleano | `?is_harvestable=true` | Indica si existe mecanismo de cosecha. |
+| `requires_registration` | booleano | `?requires_registration=false` | Indica si requiere registro del usuario. |
+| `has_access_text` | booleano | `?has_access_text=true` | Indica acceso a texto completo. |
+| `valid_sintaxis` | entero | `?valid_sintaxis=1` | Sintaxis activa asociada. |
+| `institution` | entero | `?institution=1` | Institución con relación activa. |
+| `country` | entero | `?country=1` | País con relación activa. |
+| `language` | entero | `?language=1` | Idioma con relación activa. |
+| `knowledge_area` | entero | `?knowledge_area=1` | Área derivada activa. |
+| `material_type` | entero | `?material_type=1` | Tipo de material con relación activa. |
+| `academic_program` | entero | `?academic_program=1` | Programa derivado activo. |
 
-Ejemplo:
+Los valores de `status` son minúsculos y cualquier opción ajena se rechaza.
+Los filtros pueden combinarse:
 
 ```bash
-curl "http://localhost:8000/api/platforms/?status=publicado"
+curl "http://localhost:8000/api/platforms/?status=publicado&country=1&is_harvestable=true"
 ```
 
 Ordenamiento:
@@ -486,17 +491,17 @@ curl "http://localhost:8000/api/platforms/?ordering=-created_at"
 
 Filtros disponibles:
 
-```text
-institution
-country
-language
-knowledge_area
-material_type
-academic_program
-requires_registration
-has_access_text
-is_harvestable
-```
+| Parámetro | Tipo | Ejemplo | Significado |
+|---|---|---|---|
+| `institution` | entero | `?institution=1` | Institución con relación activa. |
+| `country` | entero | `?country=1` | País con relación activa. |
+| `language` | entero | `?language=1` | Idioma con relación activa. |
+| `knowledge_area` | entero | `?knowledge_area=1` | Área derivada activa. |
+| `material_type` | entero | `?material_type=1` | Tipo de material con relación activa. |
+| `academic_program` | entero | `?academic_program=1` | Programa derivado activo. |
+| `requires_registration` | booleano | `?requires_registration=false` | Requisito de registro. |
+| `has_access_text` | booleano | `?has_access_text=true` | Acceso a texto completo. |
+| `is_harvestable` | booleano | `?is_harvestable=true` | Disponibilidad de mecanismo de cosecha. |
 
 Ejemplos:
 
@@ -508,6 +513,10 @@ curl "http://localhost:8000/api/platforms/public/?has_access_text=true"
 ```
 
 También admite búsqueda por nombre y ordenamiento por `name`, `start_period` y `finish_period`.
+
+El endpoint público no acepta `status`: su queryset ya restringe siempre el
+resultado a Platforms `PUBLICADO`. Ningún filtro adicional puede hacer visible
+una Platform en `BORRADOR`, `OBSOLETO` o eliminada.
 
 ### 8.3. Historial de enlaces
 
@@ -641,3 +650,20 @@ No se implementa un recorrido global síncrono.
 
 También continúa pendiente cualquier regla adicional para derivar o sincronizar
 idiomas de Platform; esta fase no modifica ese comportamiento.
+
+## Semántica de fechas del ciclo de vida
+
+- `start_period`: fecha de registro de la plataforma. El backend la asigna al
+  crearla y nunca cambia durante publish, obsolescencia, reactivación o restore.
+- `finish_period`: fecha en que la plataforma fue marcada como `OBSOLETO`.
+  `mark-obsolete` la asigna automáticamente; `reactivate` y restore la limpian.
+- Ambos campos son de solo lectura. Enviarlos en `POST`, `PUT` o `PATCH` produce
+  HTTP 400 y no modifica los valores existentes.
+
+Etiquetas recomendadas para el Frontend:
+
+- `start_period`: **Fecha de registro de la plataforma**.
+- `finish_period`: **Fecha de obsolescencia**.
+
+Pendiente: evaluar eliminar `Platform.start_period` y `Platform.finish_period`
+si `created_at`, el estado y el historial de auditoría resultan suficientes.
