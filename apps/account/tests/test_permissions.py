@@ -82,6 +82,17 @@ class ApplicationPermissionTests(SimpleTestCase):
             self.allowed("post", "/api/accounts/users/7/restore/", user=user)
         )
 
+    def test_run_due_is_public_only_for_its_post_route(self):
+        self.assertTrue(
+            self.allowed("post", "/api/harvesting/schedules/run-due/")
+        )
+        self.assertFalse(
+            self.allowed("get", "/api/harvesting/schedules/run-due/")
+        )
+        self.assertFalse(
+            self.allowed("post", "/api/harvesting/schedules/")
+        )
+
     def test_permissions_reject_unknown_actions_and_non_boolean_values(self):
         with self.assertRaises(ValueError):
             normalize_permissions({
