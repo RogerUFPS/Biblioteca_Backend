@@ -5,15 +5,22 @@ from django.utils import timezone
 import httpx
 
 from apps.account.models import User
-from apps.catalog.models import Country
+from apps.catalog.models import Country, Language, MaterialType
 from apps.harvesting.models import Harvest, HarvestJournal, Schedule, ScheduleEvent
 from apps.harvesting.services import (
+    DoajHarvester,
     OpenAlexHarvester,
     _next_occurrence,
     get_harvester_for_platform,
+    get_latest_harvest_progress,
     run_scheduled_harvests,
 )
-from apps.journal.models import Journal, SharedJournalPlatform
+from apps.journal.models import (
+    Journal,
+    License,
+    SharedJournalLicense,
+    SharedJournalPlatform,
+)
 from apps.platforms.models import LinkCheckLog, Platform
 
 
@@ -32,6 +39,257 @@ class HarvestingServicesTestCase(TestCase):
             is_harvestable=True,
             created_by=cls.user,
         )
+        cls.doaj_platform = Platform.objects.create(
+            name="DOAJ",
+            status=Platform.Status.PUBLICADO,
+            base_api_url="https://doaj.org/oai?verb=ListRecords&metadataPrefix=oai_dc",
+            is_harvestable=True,
+            created_by=cls.user,
+        )
+
+    def _doaj_response(self, records: str, token: str = "") -> MagicMock:
+        token_xml = f"<resumptionToken>{token}</resumptionToken>"
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = 200
+        response.text = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/" '
+            'xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            f"<ListRecords>{records}{token_xml}</ListRecords>"
+            "</OAI-PMH>"
+        )
+        return response
+
+    @staticmethod
+    def _doaj_record(
+        issn: str = "1982-0003",
+        title: str = "Para Onde!?",
+    ) -> str:
+        return (
+            "<record><header><identifier>oai:doaj.org/journal:example</identifier>"
+            "</header><metadata><oai_dc:dc>"
+            f"<dc:title>{title}</dc:title>"
+            f"<dc:identifier>{issn}</dc:identifier>"
+            f"<dc:identifier>https://doaj.org/toc/{issn}</dc:identifier>"
+            "<dc:language>PT</dc:language><dc:language>ES</dc:language>"
+            "<dc:rights>CC BY-NC-SA</dc:rights>"
+            "<dc:publisher>Programa de Pós Graduação em Geografia</dc:publisher>"
+            "<dc:relation>https://journal.example.edu/index</dc:relation>"
+            "<dc:relation>https://journal.example.edu/about</dc:relation>"
+            "<dc:date>2026-09-18T19:30:23Z</dc:date>"
+            "<dc:type>journal</dc:type>"
+            "<dc:subject>geography</dc:subject>"
+            "</oai_dc:dc></metadata></record>"
+        )
+
+    def test_doaj_factory_uses_oai_pmh_harvester(self):
+        harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            stop_after_minutes=10,
+            created_by=self.user,
+        )
+        self.assertIsInstance(get_harvester_for_platform(harvest), DoajHarvester)
+
+    def test_doaj_harvester_normalizes_dublin_core_record(self):
+        Language.objects.create(
+            abbreviation="PT",
+            name="Portuguese",
+            created_by=self.user,
+        )
+        Language.objects.create(
+            abbreviation="ES",
+            name="Spanish",
+            created_by=self.user,
+        )
+        MaterialType.objects.create(name="journal", created_by=self.user)
+        client = MagicMock(spec=httpx.Client)
+        client.get.return_value = self._doaj_response(
+            self._doaj_record(),
+            token="next-page-token",
+        )
+        harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            max_quantity=1,
+            created_by=self.user,
+        )
+
+        result = DoajHarvester(
+            harvest,
+            client=client,
+            user=self.user,
+        ).harvest_records()
+
+        journal = Journal.objects.get(issn="1982-0003")
+        self.assertEqual(result.state, Harvest.State.COMPLETED)
+        self.assertEqual(result.records_added, 1)
+        self.assertEqual(result.api_cursor, "next-page-token")
+        self.assertEqual(result.api_marker, 0)
+        self.assertEqual(result.api_page, "")
+        self.assertEqual(journal.title, "Para Onde!?")
+        self.assertEqual(journal.editorial.name, "programa de pós graduação em geografia")
+        self.assertIsNone(journal.publication_date)
+        self.assertEqual(
+            set(journal.language_links.values_list("language__abbreviation", flat=True)),
+            {"PT", "ES"},
+        )
+        self.assertTrue(journal.material_type_links.filter(material_type__name="journal").exists())
+        self.assertTrue(
+            SharedJournalLicense.objects.filter(
+                journal=journal,
+                license__name="cc by-nc-sa",
+            ).exists()
+        )
+        self.assertEqual(
+            client.get.call_args.args[0],
+            "https://doaj.org/oai",
+        )
+        self.assertEqual(
+            client.get.call_args.kwargs["params"],
+            {"verb": "ListRecords", "metadataPrefix": "oai_dc"},
+        )
+        self.assertEqual(
+            get_latest_harvest_progress(self.doaj_platform)["api_cursor"],
+            "next-page-token",
+        )
+
+    def test_doaj_harvester_resumes_cached_response_at_marker(self):
+        client = MagicMock(spec=httpx.Client)
+        client.get.return_value = self._doaj_response(
+            self._doaj_record() + self._doaj_record("2532-1994", "Novecento"),
+            token="page-two-token",
+        )
+        harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            max_quantity=10,
+            stop_after_minutes=1,
+            created_by=self.user,
+        )
+        clock = iter([0, 0, 0, 60, 60])
+        with patch("apps.harvesting.services.time.monotonic", side_effect=lambda: next(clock)):
+            DoajHarvester(
+                harvest,
+                client=client,
+                user=self.user,
+            ).harvest_records()
+
+        harvest.refresh_from_db()
+        self.assertEqual(harvest.state, Harvest.State.COMPLETED)
+        self.assertEqual(harvest.records_added, 1)
+        self.assertEqual(harvest.api_marker, 1)
+        self.assertTrue(harvest.api_page)
+        self.assertEqual(client.get.call_count, 1)
+        progress = get_latest_harvest_progress(self.doaj_platform)
+        self.assertEqual(progress["api_cursor"], "")
+        self.assertEqual(progress["api_marker"], 1)
+        self.assertEqual(progress["api_page"], harvest.api_page)
+
+        next_harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            max_quantity=1,
+            api_cursor=progress["api_cursor"],
+            api_marker=progress["api_marker"],
+            api_page=progress["api_page"],
+            created_by=self.user,
+        )
+        resumed_client = MagicMock(spec=httpx.Client)
+        resumed = DoajHarvester(
+            next_harvest,
+            client=resumed_client,
+            user=self.user,
+        ).harvest_records()
+        self.assertEqual(resumed.records_added, 1)
+        self.assertEqual(resumed.api_cursor, "page-two-token")
+        self.assertEqual(resumed.api_marker, 0)
+        self.assertEqual(resumed.api_page, "")
+        resumed_client.get.assert_not_called()
+        self.assertTrue(Journal.objects.filter(issn="2532-1994").exists())
+
+    def test_doaj_finishes_page_before_quantity_limit_and_uses_resumption_token(self):
+        first_client = MagicMock(spec=httpx.Client)
+        first_client.get.return_value = self._doaj_response(
+            self._doaj_record() + self._doaj_record("2532-1994", "Novecento"),
+            token="page-two-token",
+        )
+        first_harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            max_quantity=1,
+            created_by=self.user,
+        )
+
+        first_result = DoajHarvester(
+            first_harvest,
+            client=first_client,
+            user=self.user,
+        ).harvest_records()
+
+        self.assertEqual(first_result.records_added, 2)
+        self.assertEqual(first_result.api_cursor, "page-two-token")
+        self.assertEqual(first_result.state, Harvest.State.COMPLETED)
+
+        second_client = MagicMock(spec=httpx.Client)
+        second_client.get.return_value = self._doaj_response(
+            self._doaj_record("2050-0000", "Third journal"),
+        )
+        second_harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            max_quantity=1,
+            created_by=self.user,
+            **get_latest_harvest_progress(self.doaj_platform),
+        )
+
+        DoajHarvester(
+            second_harvest,
+            client=second_client,
+            user=self.user,
+        ).harvest_records()
+
+        self.assertEqual(
+            second_client.get.call_args.kwargs["params"],
+            {"verb": "ListRecords", "resumptionToken": "page-two-token"},
+        )
+
+    def test_doaj_oai_error_is_reported_as_failed_harvest(self):
+        client = MagicMock(spec=httpx.Client)
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = 200
+        response.text = (
+            '<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">'
+            '<error code="badArgument">Invalid request</error></OAI-PMH>'
+        )
+        client.get.return_value = response
+        harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            stop_after_minutes=10,
+            created_by=self.user,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "badArgument"):
+            DoajHarvester(harvest, client=client, user=self.user).harvest_records()
+
+        harvest.refresh_from_db()
+        self.assertEqual(harvest.state, Harvest.State.FAILED)
+        self.assertIn("badArgument", harvest.error_message)
+
+    def test_doaj_invalid_endpoint_marks_harvest_as_failed(self):
+        platform = Platform.objects.create(
+            name="DOAJ Invalid URL",
+            status=Platform.Status.PUBLICADO,
+            base_api_url="not-a-url",
+            is_harvestable=True,
+            created_by=self.user,
+        )
+        harvest = Harvest.objects.create(
+            platform=platform,
+            stop_after_minutes=10,
+            created_by=self.user,
+        )
+
+        with self.assertRaisesRegex(ValueError, "no es válida"):
+            DoajHarvester(harvest, user=self.user).harvest_records()
+
+        harvest.refresh_from_db()
+        self.assertEqual(harvest.state, Harvest.State.FAILED)
 
     def test_default_openalex_client_does_not_advertise_email(self):
         harvest = Harvest.objects.create(
