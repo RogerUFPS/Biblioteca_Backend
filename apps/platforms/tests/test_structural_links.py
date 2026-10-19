@@ -21,12 +21,12 @@ class PlatformStructuralLinksTests(APITestCase):
     def setUp(self):
         self.client.force_authenticate(user=self.user)
 
-    def test_platform_creation_allows_missing_public_url_in_draft(self):
+    def test_platform_creation_requires_public_url(self):
         response = self.client.post(
             "/api/platforms/", {"name": "Sin URL"}, format="json"
         )
-        self.assertEqual(response.status_code, 201)
-        self.assertTrue(Platform.objects.filter(name="sin url").exists())
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Platform.objects.filter(name="sin url").exists())
 
     def test_platform_creation_registers_public_url(self):
         response = self.client.post(
@@ -35,11 +35,13 @@ class PlatformStructuralLinksTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 201)
-        self.assertTrue(LinkCheckLog.objects.filter(
+        log = LinkCheckLog.objects.get(
             platform_id=response.data["id"],
             journal_platform__isnull=True,
             url="https://8.8.8.8/platform",
-        ).exists())
+        )
+        self.assertFalse(log.is_active)
+        self.assertIsNone(log.last_check)
 
     @patch("apps.platforms.services._perform_link_check", return_value=(200, True))
     @patch("apps.platforms.services._validate_safe_http_url")

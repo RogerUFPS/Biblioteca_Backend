@@ -210,6 +210,48 @@ class PlatformServicesTests(TestCase):
             errors,
         )
 
+    def test_publish_requires_public_url_to_be_verified(self):
+        platform = self._setup_complete_platform()
+        services.register_link_url(
+            platform=platform,
+            url="https://example.org/pending",
+            user=self.system,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            services.publish_platform(platform=platform, user=self.system)
+
+        self.assertIn("debe verificarse", str(context.exception.detail["url"]))
+
+    def test_publish_rejects_unavailable_public_url(self):
+        platform = self._setup_complete_platform()
+        models.LinkCheckLog.objects.create(
+            platform=platform,
+            url="https://example.org/unavailable",
+            is_active=False,
+            last_check=timezone.now(),
+            created_by=self.system,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            services.publish_platform(platform=platform, user=self.system)
+
+        self.assertIn("no se encuentra disponible", str(context.exception.detail["url"]))
+
+    def test_registered_url_starts_unverified(self):
+        platform = models.Platform.objects.create(
+            name="Plataforma pendiente", created_by=self.system,
+        )
+        log = services.register_link_url(
+            platform=platform,
+            url="https://example.org/pending",
+            user=self.system,
+        )
+
+        self.assertFalse(log.is_active)
+        self.assertIsNone(log.last_check)
+        self.assertEqual(services.link_verification_status(log), "unverified")
+
     def test_lifecycle_transitions_obsolete_and_reactivate(self):
         """Verifica la transicion de PUBLICADO a OBSOLETO y reactivacion a BORRADOR."""
         platform = self._setup_complete_platform()
