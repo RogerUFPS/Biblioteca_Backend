@@ -228,6 +228,10 @@ class ValidSintaxisPublicSerializer(
 class LinkCheckLogSerializer(
     serializers.ModelSerializer,
 ):
+    verification_status = serializers.SerializerMethodField(
+        help_text="unverified, available o unavailable según el último chequeo.",
+    )
+
     class Meta:
         model = models.LinkCheckLog
 
@@ -240,9 +244,16 @@ class LinkCheckLogSerializer(
             "http_status_code",
             "is_active",
             "last_check",
+            "verification_status",
         ]
 
         read_only_fields = AUDIT_FIELDS
+
+    @extend_schema_field(serializers.ChoiceField(
+        choices=("unverified", "available", "unavailable"),
+    ))
+    def get_verification_status(self, obj):
+        return services.link_verification_status(obj)
 
 
 class PlatformLinkCheckResultSerializer(serializers.Serializer):
@@ -253,6 +264,9 @@ class PlatformLinkCheckResultSerializer(serializers.Serializer):
     is_active = serializers.BooleanField()
     http_status_code = serializers.IntegerField(allow_null=True)
     last_check = serializers.DateTimeField(allow_null=True)
+    verification_status = serializers.ChoiceField(
+        choices=("unverified", "available", "unavailable"),
+    )
     error = serializers.CharField(required=False)
 
 
@@ -457,6 +471,11 @@ class PlatformSerializer(
         academic_programs.
         """
         attrs = super().validate(attrs)
+
+        if self.instance is None and not attrs.get("public_url"):
+            raise serializers.ValidationError({
+                "public_url": "La URL pública es obligatoria al crear una plataforma."
+            })
 
         instance = self.instance
 
@@ -755,6 +774,10 @@ class PlatformPublicLinkStatusSchemaSerializer(
     last_check = serializers.DateTimeField(
         allow_null=True,
     )
+    verification_status = serializers.ChoiceField(
+        choices=("unverified", "available", "unavailable"),
+        allow_null=True,
+    )
 
 
 class PlatformPublicSerializer(
@@ -910,12 +933,14 @@ class PlatformPublicSerializer(
                 "url": latest_log.url,
                 "is_active": latest_log.is_active,
                 "last_check": latest_log.last_check,
+                "verification_status": services.link_verification_status(latest_log),
             }
         else:
             data = {
                 "url": None,
                 "is_active": None,
                 "last_check": None,
+                "verification_status": None,
             }
 
         return PlatformPublicLinkStatusSchemaSerializer(data).data

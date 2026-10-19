@@ -98,3 +98,33 @@ class PlatformPublicFilter(PlatformBaseFilter):
     class Meta:
         model = models.Platform
         fields = []
+
+
+class LinkCheckLogFilter(django_filters.FilterSet):
+    """Filtros del historial, incluida la semántica de verificación."""
+
+    journal_platform__isnull = django_filters.BooleanFilter(
+        field_name="journal_platform",
+        lookup_expr="isnull",
+    )
+    verification_status = django_filters.ChoiceFilter(
+        choices=(
+            ("unverified", "Sin verificar"),
+            ("available", "Disponible"),
+            ("unavailable", "No disponible"),
+        ),
+        method="filter_verification_status",
+    )
+
+    class Meta:
+        model = models.LinkCheckLog
+        fields = ["platform", "journal_platform", "is_active"]
+
+    def filter_verification_status(self, queryset, name, value):
+        if value == "unverified":
+            return queryset.filter(last_check__isnull=True)
+        if value == "available":
+            return queryset.filter(last_check__isnull=False, is_active=True)
+        if value == "unavailable":
+            return queryset.filter(last_check__isnull=False, is_active=False)
+        return queryset

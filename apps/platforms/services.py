@@ -18,7 +18,9 @@ SYNTAX_SIMILARITY_THRESHOLD = 70
 # Estos códigos indican que el servidor/recurso existe,
 # aunque requiera autenticación o restrinja el acceso.
 LINK_ACTIVE_AUTH_STATUSES = {401, 403}
-LINK_LOG_ORDERING = ("-last_check", "-created_at", "-pk")
+# El contexto vigente es siempre el evento más reciente. No se ordena por
+# last_check porque NULL representa "sin verificar", no menor antigüedad.
+LINK_LOG_ORDERING = ("-created_at", "-pk")
 BLOCKED_METADATA_HOSTS = {
     "instance-data.ec2.internal",
     "metadata.azure.internal",
@@ -128,6 +130,12 @@ def latest_journal_link_log(journal_platform):
     )
 
 
+def link_verification_status(link_log) -> str:
+    if link_log.last_check is None:
+        return "unverified"
+    return "available" if link_log.is_active else "unavailable"
+
+
 def register_link_url(
     *,
     platform: models.Platform,
@@ -179,6 +187,8 @@ def register_link_url(
         platform=platform,
         journal_platform=journal_platform,
         url=url,
+        is_active=False,
+        last_check=None,
         created_by=user,
     )
     if hasattr(platform, "_public_link_logs"):
@@ -257,15 +267,22 @@ def validate_platform_for_publication(
             "La plataforma debe tener un nombre."
         )
 
-    # La URL pública es independiente de base_api_url.
-    # Debe existir al menos una verificación registrada en el historial.
-    if not models.LinkCheckLog.objects.filter(
-        platform=platform,
-        journal_platform__isnull=True,
-    ).exists():
+    # La URL pública es independiente de base_api_url. La URL vigente debe
+    # tener una comprobación exitosa antes de publicar.
+    current_link = latest_platform_link_log(platform)
+    if current_link is None:
         errors["url"] = (
             "La plataforma debe tener una URL pública registrada "
             "en el historial de verificación de enlaces."
+        )
+    elif current_link.last_check is None:
+        errors["url"] = (
+            "La URL pública debe verificarse antes de publicar la plataforma."
+        )
+    elif not current_link.is_active:
+        errors["url"] = (
+            "La URL pública no se encuentra disponible. Corríjala o "
+            "verifíquela nuevamente antes de publicar."
         )
 
     # Una API Key solamente tiene sentido si existe una API base.
@@ -578,7 +595,11 @@ def _get_next_fail_count(
         .first()
     )
 
-    if latest_log and not latest_log.is_active:
+    if (
+        latest_log
+        and latest_log.last_check is not None
+        and not latest_log.is_active
+    ):
         return latest_log.fail_count + 1
 
     return 1
@@ -850,6 +871,7 @@ def check_platform_links(*, platform: models.Platform, user) -> dict:
                 "is_active": False,
                 "http_status_code": None,
                 "last_check": None,
+                "verification_status": "unverified",
                 "error": str(exc),
             }
         results.append(result)
@@ -891,4 +913,5 @@ def models_to_link_result(log: models.LinkCheckLog) -> dict:
         "is_active": log.is_active,
         "http_status_code": log.http_status_code,
         "last_check": log.last_check,
+        "verification_status": link_verification_status(log),
     }

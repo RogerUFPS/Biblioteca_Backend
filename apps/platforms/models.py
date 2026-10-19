@@ -205,16 +205,35 @@ class LinkCheckLog(AuditableModel):
     )
     http_status_code = models.IntegerField(null=True, blank=True)
     is_active = models.BooleanField(
-        default=True,
-        help_text="Indica si el enlace respondió correctamente en el último chequeo."
+        default=False,
+        help_text=(
+            "Indica si el enlace respondió correctamente. Solo representa "
+            "disponibilidad cuando last_check no es nulo."
+        )
     )
     last_check = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ["-last_check", "-created_at", "-pk"]
+        ordering = ["-created_at", "-pk"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(last_check__isnull=False)
+                    | models.Q(is_active=False)
+                ),
+                name="link_log_active_requires_check",
+            ),
+        ]
 
     def clean(self):
         super().clean()
+
+        if self.last_check is None and self.is_active:
+            raise ValidationError({
+                "is_active": (
+                    "Un enlace no puede estar disponible antes de ser verificado."
+                )
+            })
 
         if (
             self.journal_platform_id is not None

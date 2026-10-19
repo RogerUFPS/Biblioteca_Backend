@@ -183,7 +183,9 @@ class ValidSintaxisViewSet(AuditableViewSet):
             "los enlaces de las plataformas. Por defecto muestra primero "
             "las verificaciones más recientes y deja al final los registros "
             "todavía no verificados. Use journal_platform__isnull=true para "
-            "consultar únicamente URLs públicas generales."
+            "consultar únicamente URLs públicas generales y "
+            "verification_status=unverified|available|unavailable para "
+            "distinguir su estado semántico."
         ),
         parameters=[
             OpenApiParameter(
@@ -220,11 +222,7 @@ class LinkCheckLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = serializers.LinkCheckLogSerializer
     pagination_class = CustomPageNumberPagination
 
-    filterset_fields = {
-        "platform": ["exact"],
-        "journal_platform": ["exact", "isnull"],
-        "is_active": ["exact"],
-    }
+    filterset_class = filters.LinkCheckLogFilter
 
     ordering_fields = [
         "last_check",
