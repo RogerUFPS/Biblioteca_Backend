@@ -143,7 +143,7 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             platform.academic_program_links.count(),
-            0,
+            1,
         )
 
         self.assertEqual(
@@ -161,10 +161,10 @@ class PlatformSerializersTests(TestCase):
             [],
         )
 
-    def test_platform_serializer_ignores_manual_academic_classification(
+    def test_platform_serializer_creates_manual_academic_classification(
         self,
     ):
-        """La clasificación manual se ignora porque ambos campos son read-only."""
+        """Los programas pueden aportarse manualmente a la Platform."""
         data = {
             "name": "Scielo",
             "public_url": "https://8.8.8.8/scielo",
@@ -194,7 +194,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            set(),
+            {self.academic_program.pk, self.academic_program_secondary.pk},
         )
 
         self.assertEqual(
@@ -212,14 +212,14 @@ class PlatformSerializersTests(TestCase):
         ).data
 
         self.assertEqual(
-            set(data["knowledge_areas"]),
+            {item["id"] for item in data["knowledge_areas"]},
             set(),
         )
 
-    def test_platform_serializer_does_not_accept_knowledge_areas_as_input(
+    def test_platform_serializer_accepts_knowledge_areas_as_manual_input(
         self,
     ):
-        """Las knowledge_areas no forman parte de la entrada del usuario."""
+        """Las áreas y programas pueden coexistir con fuentes derivadas."""
         data = {
             "name": "JSTOR",
             "public_url": "https://8.8.8.8/jstor",
@@ -240,11 +240,11 @@ class PlatformSerializersTests(TestCase):
             serializer.errors,
         )
 
-        self.assertNotIn(
+        self.assertIn(
             "knowledge_areas",
             serializer.validated_data,
         )
-        self.assertNotIn(
+        self.assertIn(
             "academic_programs",
             serializer.validated_data,
         )
@@ -260,7 +260,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            [],
+            [self.knowledge_area.pk],
         )
 
     def test_platform_serializer_allows_null_api_key_without_base_api_url(
@@ -488,10 +488,10 @@ class PlatformSerializersTests(TestCase):
             updated.encrypted_api_key,
         )
 
-    def test_platform_serializer_patch_cannot_create_academic_relations(
+    def test_platform_serializer_patch_preserves_manual_academic_relations(
         self,
     ):
-        """Enviar academic_programs por PATCH no crea relaciones derivadas."""
+        """Un PATCH posterior conserva las relaciones manuales no enviadas."""
         platform = models.Platform.objects.create(
             name="Plataforma Existente",
             created_by=self.system,
@@ -540,7 +540,7 @@ class PlatformSerializersTests(TestCase):
                     flat=True,
                 )
             ),
-            [],
+            [self.academic_program.pk],
         )
 
         self.assertEqual(
@@ -553,10 +553,10 @@ class PlatformSerializersTests(TestCase):
             [],
         )
 
-    def test_platform_serializer_empty_academic_programs_is_read_only(
+    def test_platform_serializer_empty_academic_programs_removes_manual_origin(
         self,
     ):
-        """Enviar academic_programs=[] no administra relaciones derivadas."""
+        """Una lista vacía retira solo la contribución manual."""
         platform = models.Platform.objects.create(
             name="Plataforma Clasificada",
             created_by=self.system,
@@ -583,7 +583,7 @@ class PlatformSerializersTests(TestCase):
 
         self.assertEqual(
             platform.academic_program_links.count(),
-            0,
+            1,
         )
 
         self.assertEqual(

@@ -77,12 +77,36 @@ class PlatformAPITests(APITestCase):
         """Helper para obtener el payload asegurando el tipado estático."""
         return getattr(response, "data", {})
 
+    def test_similar_syntax_returns_explainable_exact_match(self):
+        response = self.client.post(
+            "/api/platforms/valid-sintaxis/similar/",
+            {
+                "booleans": ["AND", "OR"],
+                "parenthesis": True,
+                "fields": {"title": "ti"},
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["id"], self.sintaxis.pk)
+        self.assertEqual(result["similarity"], 100)
+        self.assertEqual(result["different_fields"], [])
+
+    def test_platform_can_be_created_incomplete_as_draft(self):
+        response = self.client.post(
+            "/api/platforms/", {"name": "borrador incompleto"}, format="json"
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], models.Platform.Status.BORRADOR)
+
     def _setup_complete_platform(
         self,
         name="Plataforma API Test",
     ):
         platform = models.Platform.objects.create(
             name=name,
+            url_image="https://example.org/platform.png",
             is_harvestable=True,
             base_api_url="https://api.test.org",
             valid_sintaxis=self.sintaxis,

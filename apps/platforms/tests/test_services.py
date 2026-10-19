@@ -69,6 +69,7 @@ class PlatformServicesTests(TestCase):
     def _setup_complete_platform(self):
         platform = models.Platform.objects.create(
             name="Plataforma Completa",
+            url_image="https://example.org/platform.png",
             is_harvestable=True,
             base_api_url="https://api.completa.org",
             valid_sintaxis=self.sintaxis,

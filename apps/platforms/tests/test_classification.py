@@ -40,6 +40,9 @@ class PlatformClassificationTests(TestCase):
             journal_models.SharedJournalAcademicProgram.objects.create(
                 journal=journal, academic_program=self.program, created_by=self.user
             )
+            journal_models.SharedJournalKnowledgeArea.objects.create(
+                journal=journal, knowledge_area=self.area, created_by=self.user
+            )
             journal_models.SharedJournalPlatform.objects.create(
                 journal=journal, platform=platform, created_by=self.user
             )
@@ -54,6 +57,11 @@ class PlatformClassificationTests(TestCase):
                 .values_list("knowledge_area_id", flat=True)),
             {self.area.pk},
         )
+        link = models.SharedPlatformAcademicProgram.objects.get(
+            platform=platform, academic_program=self.program,
+        )
+        self.assertFalse(link.is_manual)
+        self.assertTrue(link.is_derived)
 
     def test_incomplete_eligible_classification_moves_published_to_draft(self):
         platform = models.Platform.objects.create(

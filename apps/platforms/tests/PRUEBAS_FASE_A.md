@@ -370,3 +370,10 @@ resultados independientes ante fallos parciales.
 
 El endpoint público no incorpora `status`, porque su queryset ya restringe el
 resultado a `PUBLICADO`.
+# Cobertura de la ampliación de reglas
+
+La fase incluye ahora escenarios para creación incompleta en borrador,
+publicación con secciones efectivas, procedencia manual/derivada, recálculo
+desde Journals elegibles, sintaxis similares y verificación global de enlaces.
+También deben comprobarse los filtros contextuales de catálogos y los bloqueos
+de eliminación de Platform y ValidSintaxis en uso.

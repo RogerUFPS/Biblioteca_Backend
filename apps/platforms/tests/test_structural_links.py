@@ -21,12 +21,12 @@ class PlatformStructuralLinksTests(APITestCase):
     def setUp(self):
         self.client.force_authenticate(user=self.user)
 
-    def test_platform_creation_requires_public_url(self):
+    def test_platform_creation_allows_missing_public_url_in_draft(self):
         response = self.client.post(
             "/api/platforms/", {"name": "Sin URL"}, format="json"
         )
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(Platform.objects.filter(name="sin url").exists())
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(Platform.objects.filter(name="sin url").exists())
 
     def test_platform_creation_registers_public_url(self):
         response = self.client.post(
