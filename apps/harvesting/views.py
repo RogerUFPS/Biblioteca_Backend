@@ -94,7 +94,8 @@ class ScheduleViewSet(AuditableViewSet):
         },
         tags=["Cosecha - Programaciones"],
     )
-    @action(detail=False, methods=["post"], url_path="run-due")
+    @action(detail=False, methods=["post"], url_path="run-due",authentication_classes=[],
+    permission_classes=[AllowAny])
     def run_due(self, request):
         try:
             harvests = services.run_scheduled_harvests()
