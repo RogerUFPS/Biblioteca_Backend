@@ -1,5 +1,6 @@
 from typing import Any
 
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.account.models import User
@@ -100,6 +101,8 @@ class JournalAPITests(APITestCase):
         platform_models.LinkCheckLog.objects.create(
             platform=cls.platform,
             url="https://example.org/scopus",
+            is_active=True,
+            last_check=timezone.now(),
             created_by=cls.system,
         )
         cls.license = models.License.objects.create(name="CC BY", created_by=cls.system)
