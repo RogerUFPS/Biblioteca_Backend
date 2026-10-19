@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -138,7 +139,10 @@ def recalculate_platforms(platform_ids: Iterable[int], *, user) -> set[int]:
             rows = journal_through.objects.filter(
                 journal_id__in=all_eligible_journal_ids,
                 **{f"{relation_field}__deleted_at__isnull": True},
-            ).values_list("journal_id", f"{relation_field}_id")
+            )
+            if journal_through is journal_models.SharedJournalKnowledgeArea:
+                rows = rows.filter(Q(is_manual=True) | Q(is_derived=True))
+            rows = rows.values_list("journal_id", f"{relation_field}_id")
             values_by_journal = defaultdict(set)
             for journal_id, related_id in rows:
                 values_by_journal[journal_id].add(related_id)
