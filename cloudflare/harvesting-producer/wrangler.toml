@@ -1,8 +1,0 @@
-name = "ufps-harvesting-producer"
-main = "src/index.js"
-compatibility_date = "2026-10-19"
-workers_dev = true
-
-[[queues.producers]]
-binding = "HARVEST_QUEUE"
-queue = "ufps-harvesting"
