@@ -7,14 +7,104 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.catalog.models import SharedAcademicProgramKnowledgeArea
-from apps.core.relations import sync_auditable_relation_ids
-
 from . import models
 
 
 JOURNAL_DERIVED_DELETE = (
     "Área derivada retirada al recalcular la clasificación de la revista."
 )
+JOURNAL_MANUAL_DELETE = (
+    "Área manual retirada durante la actualización de la revista."
+)
+
+
+def _set_origin(link, *, user, is_manual=None, is_derived=None):
+    changed_fields = []
+    if is_manual is not None and link.is_manual != is_manual:
+        link.is_manual = is_manual
+        changed_fields.append("is_manual")
+    if is_derived is not None and link.is_derived != is_derived:
+        link.is_derived = is_derived
+        changed_fields.append("is_derived")
+    if changed_fields:
+        link.updated_by = user
+        link.updated_at = timezone.now()
+        link.save(update_fields=[*changed_fields, "updated_by", "updated_at"])
+    return bool(changed_fields)
+
+
+def _restore_with_origin(link, *, user, origin):
+    link.deleted_by = None
+    link.deleted_at = None
+    link.delete_explanation = None
+    link.is_manual = origin == "is_manual"
+    link.is_derived = origin == "is_derived"
+    link.updated_by = user
+    link.updated_at = timezone.now()
+    link.save(update_fields=[
+        "deleted_by", "deleted_at", "delete_explanation",
+        "is_manual", "is_derived", "updated_by", "updated_at",
+    ])
+
+
+def _sync_area_origin(*, journal, desired_ids, origin, user):
+    desired_ids = set(desired_ids)
+    links = {
+        link.knowledge_area_id: link
+        for link in models.SharedJournalKnowledgeArea.all_objects
+        .select_for_update()
+        .filter(journal=journal)
+    }
+    changed = False
+    for area_id, link in links.items():
+        wanted = area_id in desired_ids
+        if origin == "is_manual" and not link.is_deleted and link.is_derived:
+            # Una relación derivada no puede alterarse desde la selección manual.
+            continue
+        if wanted:
+            if link.is_deleted:
+                _restore_with_origin(link, user=user, origin=origin)
+                changed = True
+            else:
+                changed |= _set_origin(link, user=user, **{origin: True})
+        else:
+            other_origin = (
+                link.is_derived if origin == "is_manual" else link.is_manual
+            )
+            if not link.is_deleted and not other_origin:
+                # El override de soft_delete limpia ambos orígenes y marca la
+                # eliminación en una sola escritura, sin violar el constraint.
+                link.soft_delete(
+                    user=user,
+                    explanation=(
+                        JOURNAL_MANUAL_DELETE
+                        if origin == "is_manual"
+                        else JOURNAL_DERIVED_DELETE
+                    ),
+                )
+                changed = True
+            else:
+                changed |= _set_origin(link, user=user, **{origin: False})
+    for area_id in desired_ids - links.keys():
+        models.SharedJournalKnowledgeArea.objects.create(
+            journal=journal,
+            knowledge_area_id=area_id,
+            **{origin: True},
+            created_by=user,
+        )
+        changed = True
+    return changed
+
+
+@transaction.atomic
+def sync_manual_knowledge_areas(journal, knowledge_areas, *, user):
+    """Sincroniza la procedencia manual sin eliminar aportes derivados."""
+    return _sync_area_origin(
+        journal=journal,
+        desired_ids=(area.pk for area in knowledge_areas),
+        origin="is_manual",
+        user=user,
+    )
 
 
 def _area_ids_by_program(program_ids: set[int]) -> dict[int, set[int]]:
@@ -62,12 +152,6 @@ def recalculate_journals(
         all_program_ids.add(program_id)
 
     areas_by_program = _area_ids_by_program(all_program_ids)
-    area_links_by_journal: dict[int, list] = defaultdict(list)
-    for link in models.SharedJournalKnowledgeArea.all_objects.filter(
-        journal_id__in=ids
-    ):
-        area_links_by_journal[link.journal_id].append(link)
-
     changed_journal_ids: set[int] = set()
     journals = models.Journal.all_objects.select_for_update().filter(pk__in=ids)
     for journal in journals:
@@ -76,15 +160,11 @@ def recalculate_journals(
             set().union(*(areas_by_program.get(pk, set()) for pk in program_ids))
             if program_ids else set()
         )
-        changed = sync_auditable_relation_ids(
-            through_model=models.SharedJournalKnowledgeArea,
-            parent_field="journal",
-            parent_id=journal.pk,
-            related_field="knowledge_area",
+        changed = _sync_area_origin(
+            journal=journal,
             desired_ids=desired,
+            origin="is_derived",
             user=user,
-            delete_explanation=JOURNAL_DERIVED_DELETE,
-            existing_links=area_links_by_journal.get(journal.pk, []),
         )
         if not changed:
             continue
@@ -119,4 +199,3 @@ def propagate_catalog_change(program_ids: Iterable[int], *, user) -> set[int]:
         from apps.platforms.classification import recalculate_platforms
         recalculate_platforms(platform_ids, user=user)
     return platform_ids
-

@@ -1,5 +1,7 @@
 import django_filters  # type: ignore[import-untyped]
 
+from django.db.models import Q
+
 from apps.platforms.models import Platform
 
 from . import models
@@ -121,6 +123,8 @@ class JournalBaseFilter(django_filters.FilterSet):
 
     def filter_knowledge_area(self, queryset, name, value):
         return queryset.filter(
+            Q(knowledge_area_links__is_manual=True)
+            | Q(knowledge_area_links__is_derived=True),
             knowledge_area_links__knowledge_area_id=value,
             knowledge_area_links__deleted_at__isnull=True,
             knowledge_area_links__knowledge_area__deleted_at__isnull=True,

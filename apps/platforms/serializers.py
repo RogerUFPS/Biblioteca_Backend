@@ -18,7 +18,7 @@ from apps.core.serializers import (
 )
 from apps.core.viewsets import ArchivedNameMixin
 
-from . import models, services
+from . import classification, models, services
 
 
 PLATFORM_RELATION_CONFIG = (
@@ -171,6 +171,45 @@ class ValidSintaxisSerializer(
 
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        configuration = services.normalized_syntax_configuration(
+            {
+                "booleans": attrs.get("booleans", getattr(self.instance, "booleans", [])),
+                "parenthesis": attrs.get(
+                    "parenthesis", getattr(self.instance, "parenthesis", False)
+                ),
+                "fields": attrs.get("fields", getattr(self.instance, "fields", {})),
+            }
+        )
+        duplicate = services.find_identical_syntax(
+            configuration,
+            exclude_id=getattr(self.instance, "pk", None),
+        )
+        if duplicate:
+            raise serializers.ValidationError({
+                "detail": "Ya existe una sintaxis con esta configuración.",
+                "existing_id": duplicate.pk,
+            })
+        return attrs
+
+
+class ValidSintaxisSimilarityRequestSerializer(serializers.Serializer):
+    booleans = serializers.ListField(child=serializers.CharField())
+    parenthesis = serializers.BooleanField()
+    fields = serializers.DictField(child=serializers.CharField())
+
+    def validate_fields(self, value):
+        return ValidSintaxisSerializer().validate_fields(value)
+
+
+class ValidSintaxisSimilarityResultSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    similarity = serializers.IntegerField()
+    matching_fields = serializers.ListField(child=serializers.CharField())
+    different_fields = serializers.ListField(child=serializers.CharField())
+
 
 class ValidSintaxisPublicSerializer(
     serializers.ModelSerializer,
@@ -189,6 +228,10 @@ class ValidSintaxisPublicSerializer(
 class LinkCheckLogSerializer(
     serializers.ModelSerializer,
 ):
+    verification_status = serializers.SerializerMethodField(
+        help_text="unverified, available o unavailable según el último chequeo.",
+    )
+
     class Meta:
         model = models.LinkCheckLog
 
@@ -201,9 +244,16 @@ class LinkCheckLogSerializer(
             "http_status_code",
             "is_active",
             "last_check",
+            "verification_status",
         ]
 
         read_only_fields = AUDIT_FIELDS
+
+    @extend_schema_field(serializers.ChoiceField(
+        choices=("unverified", "available", "unavailable"),
+    ))
+    def get_verification_status(self, obj):
+        return services.link_verification_status(obj)
 
 
 class PlatformLinkCheckResultSerializer(serializers.Serializer):
@@ -214,6 +264,9 @@ class PlatformLinkCheckResultSerializer(serializers.Serializer):
     is_active = serializers.BooleanField()
     http_status_code = serializers.IntegerField(allow_null=True)
     last_check = serializers.DateTimeField(allow_null=True)
+    verification_status = serializers.ChoiceField(
+        choices=("unverified", "available", "unavailable"),
+    )
     error = serializers.CharField(required=False)
 
 
@@ -321,15 +374,11 @@ class PlatformSerializer(
         write_only=True,
     )
 
-    # Las áreas no son un dato de entrada. Se calculan a partir de los
-    # programas académicos y se exponen únicamente en la representación.
-    knowledge_areas = serializers.ListField(
-        child=serializers.IntegerField(),
-        read_only=True,
-        help_text=(
-            "Áreas del conocimiento derivadas automáticamente de los "
-            "programas académicos asociados."
-        ),
+    knowledge_areas = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=KnowledgeArea.objects.all(),
+        required=False,
+        write_only=True,
     )
 
     material_types = serializers.PrimaryKeyRelatedField(
@@ -339,13 +388,11 @@ class PlatformSerializer(
         write_only=True,
     )
 
-    academic_programs = serializers.ListField(
-        child=serializers.IntegerField(),
-        read_only=True,
-        help_text=(
-            "Programas derivados automáticamente de las revistas elegibles "
-            "asociadas a la plataforma."
-        ),
+    academic_programs = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=AcademicProgram.objects.all(),
+        required=False,
+        write_only=True,
     )
 
     class Meta:
@@ -381,8 +428,6 @@ class PlatformSerializer(
             "finish_period",
             "validated_by",
             "validated_at",
-            "knowledge_areas",
-            "academic_programs",
         ]
 
     def to_internal_value(self, data):
@@ -510,10 +555,21 @@ class PlatformSerializer(
             instance
         )
 
-        representation = self._represent_relations(
-            instance=instance,
-            representation=representation,
-        )
+        for data_field, through_model, relation_field in classification.MANUAL_SECTION_SPECS:
+            links = through_model.objects.filter(
+                platform=instance,
+            ).select_related(relation_field).order_by(f"{relation_field}__name")
+            representation[data_field] = [
+                {
+                    "id": getattr(link, f"{relation_field}_id"),
+                    "name": getattr(link, relation_field).name,
+                    "is_manual": link.is_manual,
+                    "is_derived": link.is_derived,
+                    "editable": link.is_manual and not link.is_derived,
+                }
+                for link in links
+                if link.is_manual or link.is_derived
+            ]
         latest_log = services.latest_platform_link_log(instance)
         representation["public_url"] = latest_log.url if latest_log else None
         return representation
@@ -571,9 +627,8 @@ class PlatformSerializer(
             )
 
         if relation_data:
-            self._sync_relations(
-                parent=platform,
-                relation_data=relation_data,
+            classification.sync_manual_platform_sections(
+                platform, relation_data, user=platform.created_by,
             )
 
         if public_url is not None:
@@ -582,6 +637,8 @@ class PlatformSerializer(
                 url=public_url,
                 user=platform.created_by,
             )
+
+        classification.recalculate_platforms([platform.pk], user=platform.created_by)
 
         return platform
 
@@ -626,9 +683,10 @@ class PlatformSerializer(
             )
 
         if relation_data:
-            self._sync_relations(
-                parent=platform,
-                relation_data=relation_data,
+            classification.sync_manual_platform_sections(
+                platform,
+                relation_data,
+                user=platform.updated_by or platform.created_by,
             )
 
         if public_url_was_sent and public_url is not None:
@@ -637,6 +695,10 @@ class PlatformSerializer(
                 url=public_url,
                 user=platform.updated_by or platform.created_by,
             )
+
+        classification.recalculate_platforms(
+            [platform.pk], user=platform.updated_by or platform.created_by,
+        )
 
         return platform
 
@@ -710,6 +772,10 @@ class PlatformPublicLinkStatusSchemaSerializer(
     )
 
     last_check = serializers.DateTimeField(
+        allow_null=True,
+    )
+    verification_status = serializers.ChoiceField(
+        choices=("unverified", "available", "unavailable"),
         allow_null=True,
     )
 
@@ -867,12 +933,14 @@ class PlatformPublicSerializer(
                 "url": latest_log.url,
                 "is_active": latest_log.is_active,
                 "last_check": latest_log.last_check,
+                "verification_status": services.link_verification_status(latest_log),
             }
         else:
             data = {
                 "url": None,
                 "is_active": None,
                 "last_check": None,
+                "verification_status": None,
             }
 
         return PlatformPublicLinkStatusSchemaSerializer(data).data

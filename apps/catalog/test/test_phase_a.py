@@ -167,7 +167,7 @@ class PhaseATests(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-    def test_delete_requires_explanation_and_restore_works(self):
+    def test_delete_in_use_is_blocked_even_with_explanation(self):
         area = KnowledgeArea.objects.create(
             name="Área de prueba",
             created_by=self.system,
@@ -187,18 +187,10 @@ class PhaseATests(TestCase):
             {"delete_explanation": "Registro de prueba"},
             format="json",
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.data["permanent"])
-        self.assertFalse(KnowledgeArea.objects.filter(pk=area.pk).exists())
-        self.assertTrue(KnowledgeArea.all_objects.filter(pk=area.pk).exists())
-
-        response = self.client.post(
-            f"/api/catalog/knowledge-areas/{area.pk}/restore/",
-            format="json",
-        )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         self.assertTrue(KnowledgeArea.objects.filter(pk=area.pk).exists())
         relation.refresh_from_db()
+        self.assertFalse(relation.is_deleted)
 
     def test_delete_without_relations_is_permanent(self):
         editorial = Editorial.objects.create(

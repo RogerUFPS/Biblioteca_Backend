@@ -100,13 +100,13 @@ class JournalStructuralAPITests(APITestCase):
     def setUp(self):
         self.client.force_authenticate(user=self.user)
 
-    def test_new_journal_requires_platform_and_journal_url(self):
+    def test_new_journal_can_be_incomplete_but_new_platform_link_requires_url(self):
         response = self.client.post(
             "/api/journals/",
             {"issn": "9292-9292", "title": "Sin plataforma"},
             format="json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 201)
 
         response = self.client.post(
             "/api/journals/",
@@ -159,7 +159,7 @@ class JournalStructuralAPITests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("platforms", response.data)
 
-    def test_publish_optionally_synchronizes_licenses(self):
+    def test_failed_publish_rolls_back_license_synchronization(self):
         journal = models.Journal.objects.create(
             issn="9494-9494", title="Licencias", created_by=self.user
         )
@@ -168,11 +168,11 @@ class JournalStructuralAPITests(APITestCase):
             {"licenses": [self.license_a.pk, self.license_b.pk]},
             format="json",
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(journal.license_links.count(), 2)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(journal.license_links.count(), 0)
 
         response = self.client.post(
             f"/api/journals/{journal.pk}/publish/", {"licenses": []}, format="json"
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         self.assertEqual(journal.license_links.count(), 0)

@@ -12,16 +12,94 @@ from . import models
 
 
 LINK_CHECK_TIMEOUT_SECONDS = 10.0
+SYNTAX_SIMILARITY_LIMIT = 5
+SYNTAX_SIMILARITY_THRESHOLD = 70
 
 # Estos códigos indican que el servidor/recurso existe,
 # aunque requiera autenticación o restrinja el acceso.
 LINK_ACTIVE_AUTH_STATUSES = {401, 403}
-LINK_LOG_ORDERING = ("-last_check", "-created_at", "-pk")
+# El contexto vigente es siempre el evento más reciente. No se ordena por
+# last_check porque NULL representa "sin verificar", no menor antigüedad.
+LINK_LOG_ORDERING = ("-created_at", "-pk")
 BLOCKED_METADATA_HOSTS = {
     "instance-data.ec2.internal",
     "metadata.azure.internal",
     "metadata.google.internal",
 }
+
+
+def _normalize_syntax_value(value):
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, dict):
+        return {key: _normalize_syntax_value(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [_normalize_syntax_value(item) for item in value]
+    return value
+
+
+def normalized_syntax_configuration(data: dict) -> dict:
+    return _normalize_syntax_value({
+        "booleans": data.get("booleans", []),
+        "parenthesis": data.get("parenthesis", False),
+        "fields": data.get("fields", {}),
+    })
+
+
+def syntax_comparison(candidate: dict, existing: dict) -> dict:
+    candidate = normalized_syntax_configuration(candidate)
+    existing = normalized_syntax_configuration(existing)
+    comparable = ["booleans", "parenthesis"]
+    comparable.extend(
+        f"fields.{key}"
+        for key in sorted(set(candidate["fields"]) | set(existing["fields"]))
+        if candidate["fields"].get(key) or existing["fields"].get(key)
+    )
+    matching = []
+    different = []
+    for field in comparable:
+        if field.startswith("fields."):
+            key = field.split(".", 1)[1]
+            left = candidate["fields"].get(key)
+            right = existing["fields"].get(key)
+        else:
+            left, right = candidate[field], existing[field]
+        (matching if left == right else different).append(field)
+    similarity = round((len(matching) / len(comparable)) * 100) if comparable else 0
+    return {
+        "similarity": similarity,
+        "matching_fields": matching,
+        "different_fields": different,
+    }
+
+
+def find_identical_syntax(configuration: dict, *, exclude_id=None):
+    queryset = models.ValidSintaxis.objects.all()
+    if exclude_id is not None:
+        queryset = queryset.exclude(pk=exclude_id)
+    for syntax in queryset:
+        if syntax_comparison(configuration, {
+            "booleans": syntax.booleans,
+            "parenthesis": syntax.parenthesis,
+            "fields": syntax.fields,
+        })["similarity"] == 100:
+            return syntax
+    return None
+
+
+def similar_syntaxes(configuration: dict) -> list[dict]:
+    results = []
+    for syntax in models.ValidSintaxis.objects.all():
+        comparison = syntax_comparison(configuration, {
+            "booleans": syntax.booleans,
+            "parenthesis": syntax.parenthesis,
+            "fields": syntax.fields,
+        })
+        if comparison["similarity"] >= SYNTAX_SIMILARITY_THRESHOLD:
+            results.append({"id": syntax.pk, "name": syntax.name, **comparison})
+    return sorted(results, key=lambda item: (-item["similarity"], item["id"]))[
+        :SYNTAX_SIMILARITY_LIMIT
+    ]
 
 
 def latest_platform_link_log(platform):
@@ -50,6 +128,12 @@ def latest_journal_link_log(journal_platform):
         .order_by(*LINK_LOG_ORDERING)
         .first()
     )
+
+
+def link_verification_status(link_log) -> str:
+    if link_log.last_check is None:
+        return "unverified"
+    return "available" if link_log.is_active else "unavailable"
 
 
 def register_link_url(
@@ -103,6 +187,8 @@ def register_link_url(
         platform=platform,
         journal_platform=journal_platform,
         url=url,
+        is_active=False,
+        last_check=None,
         created_by=user,
     )
     if hasattr(platform, "_public_link_logs"):
@@ -140,11 +226,25 @@ REQUIRED_PLATFORM_RELATIONS = (
         "language",
         "un idioma activo asociado",
     ),
+    (
+        "knowledge_areas",
+        models.SharedPlatformKnowledgeArea,
+        "knowledge_area",
+        "un área de conocimiento activa asociada",
+    ),
+    (
+        "academic_programs",
+        models.SharedPlatformAcademicProgram,
+        "academic_program",
+        "un programa académico activo asociado",
+    ),
 )
 
 
 def validate_platform_for_publication(
     platform: models.Platform,
+    *,
+    require_draft: bool = True,
 ) -> None:
     """
     Valida que la plataforma pueda pasar de borrador a publicado.
@@ -157,7 +257,7 @@ def validate_platform_for_publication(
             "No se puede publicar una plataforma que se encuentra eliminada."
         )
 
-    if platform.status != models.Platform.Status.BORRADOR:
+    if require_draft and platform.status != models.Platform.Status.BORRADOR:
         errors["status"] = (
             "Solo una plataforma en borrador puede publicarse."
         )
@@ -167,15 +267,22 @@ def validate_platform_for_publication(
             "La plataforma debe tener un nombre."
         )
 
-    # La URL pública es independiente de base_api_url.
-    # Debe existir al menos una verificación registrada en el historial.
-    if not models.LinkCheckLog.objects.filter(
-        platform=platform,
-        journal_platform__isnull=True,
-    ).exists():
+    # La URL pública es independiente de base_api_url. La URL vigente debe
+    # tener una comprobación exitosa antes de publicar.
+    current_link = latest_platform_link_log(platform)
+    if current_link is None:
         errors["url"] = (
             "La plataforma debe tener una URL pública registrada "
             "en el historial de verificación de enlaces."
+        )
+    elif current_link.last_check is None:
+        errors["url"] = (
+            "La URL pública debe verificarse antes de publicar la plataforma."
+        )
+    elif not current_link.is_active:
+        errors["url"] = (
+            "La URL pública no se encuentra disponible. Corríjala o "
+            "verifíquela nuevamente antes de publicar."
         )
 
     # Una API Key solamente tiene sentido si existe una API base.
@@ -189,6 +296,11 @@ def validate_platform_for_publication(
     if platform.is_harvestable and not platform.base_api_url:
         errors["base_api_url"] = (
             "Una plataforma cosechable debe tener una URL base de API."
+        )
+
+    if not platform.url_image:
+        errors["url_image"] = (
+            "La plataforma debe tener una URL de imagen para publicarse."
         )
 
     if not platform.is_harvestable and (
@@ -229,30 +341,6 @@ def validate_platform_for_publication(
             "La sintaxis de búsqueda asociada no se encuentra activa."
         )
 
-    from apps.journal.models import SharedJournalPlatform
-
-    has_eligible_journals = SharedJournalPlatform.objects.filter(
-        platform=platform,
-        journal__deleted_at__isnull=True,
-        journal__active=True,
-        journal__validated_at__isnull=False,
-    ).exists()
-    if has_eligible_journals:
-        if not models.SharedPlatformAcademicProgram.objects.filter(
-            platform=platform,
-            academic_program__deleted_at__isnull=True,
-        ).exists():
-            errors["academic_programs"] = (
-                "Las revistas elegibles deben aportar al menos un programa académico."
-            )
-        if not models.SharedPlatformKnowledgeArea.objects.filter(
-            platform=platform,
-            knowledge_area__deleted_at__isnull=True,
-        ).exists():
-            errors["knowledge_areas"] = (
-                "Las revistas elegibles deben aportar al menos un área del conocimiento."
-            )
-
     for (
         field_name,
         through_model,
@@ -262,9 +350,14 @@ def validate_platform_for_publication(
 
         has_active_relation = through_model.objects.filter(
             platform=platform,
+            is_manual=True,
             **{
                 f"{relation_field}__deleted_at__isnull": True,
             },
+        ).exists() or through_model.objects.filter(
+            platform=platform,
+            is_derived=True,
+            **{f"{relation_field}__deleted_at__isnull": True},
         ).exists()
 
         if not has_active_relation:
@@ -502,7 +595,11 @@ def _get_next_fail_count(
         .first()
     )
 
-    if latest_log and not latest_log.is_active:
+    if (
+        latest_log
+        and latest_log.last_check is not None
+        and not latest_log.is_active
+    ):
         return latest_log.fail_count + 1
 
     return 1
@@ -774,6 +871,7 @@ def check_platform_links(*, platform: models.Platform, user) -> dict:
                 "is_active": False,
                 "http_status_code": None,
                 "last_check": None,
+                "verification_status": "unverified",
                 "error": str(exc),
             }
         results.append(result)
@@ -786,10 +884,34 @@ def check_platform_links(*, platform: models.Platform, user) -> dict:
     }
 
 
+def check_all_current_links(*, user) -> None:
+    """Verifica cada URL vigente sin envolver las peticiones en una transacción global."""
+    platforms = models.Platform.objects.order_by("pk")
+    for platform in platforms:
+        contexts = [None]
+        contexts.extend(
+            platform.journal_links.filter(
+                journal__deleted_at__isnull=True,
+            ).select_related("journal")
+        )
+        for journal_platform in contexts:
+            try:
+                check_link_context(
+                    platform=platform,
+                    journal_platform=journal_platform,
+                    user=user,
+                )
+            except Exception:
+                # Cada contexto es independiente: una URL inválida o ausente no
+                # impide comprobar las restantes.
+                continue
+
+
 def models_to_link_result(log: models.LinkCheckLog) -> dict:
     return {
         "url": log.url,
         "is_active": log.is_active,
         "http_status_code": log.http_status_code,
         "last_check": log.last_check,
+        "verification_status": link_verification_status(log),
     }
