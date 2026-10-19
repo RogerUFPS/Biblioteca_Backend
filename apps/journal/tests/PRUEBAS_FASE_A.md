@@ -256,3 +256,9 @@ el almacenamiento de la URL exclusivamente en `LinkCheckLog`.
 
 No existe un filtro `publication_status`: `/public/` continúa siendo la fuente
 para consultar exclusivamente Journals activas, validadas y no eliminadas.
+# Cobertura de publicación e integridad
+
+La fase incluye ahora creación incompleta, validación estricta al publicar,
+License final obligatoria y rollback atómico, distinción entre ausencia de
+Platforms y ausencia de Platforms publicadas, asociaciones administrativas
+filtrables y limpieza de estado/validación durante Soft Delete.

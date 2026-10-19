@@ -7,12 +7,14 @@ from apps.catalog.models import (
     AcademicProgram,
     Country,
     Editorial,
+    Institution,
     KnowledgeArea,
     Language,
     MaterialType,
     SharedAcademicProgramKnowledgeArea,
 )
 from apps.journal import models
+from apps.platforms import models as platform_models
 from apps.platforms.models import Platform
 
 
@@ -65,13 +67,42 @@ class JournalAPITests(APITestCase):
             created_by=cls.system,
         )
 
+        cls.syntax = platform_models.ValidSintaxis.objects.create(
+            name="sintaxis journal api",
+            booleans=["AND", "OR"],
+            parenthesis=True,
+            fields={"title": "ti"},
+            created_by=cls.system,
+        )
         cls.platform = Platform.objects.create(
             name="Scopus API Test",
             is_harvestable=True,
             base_api_url="https://api.scopus.test",
+            url_image="https://example.org/scopus.png",
+            valid_sintaxis=cls.syntax,
             status=Platform.Status.PUBLICADO,
             created_by=cls.system,
         )
+        section_links = (
+            (platform_models.SharedPlatformSupport, "institution", Institution.objects.create(name="UFPS", created_by=cls.system)),
+            (platform_models.SharedPlatformLanguage, "language", cls.language),
+            (platform_models.SharedPlatformCountry, "country", cls.country),
+            (platform_models.SharedPlatformKnowledgeArea, "knowledge_area", cls.knowledge_area),
+            (platform_models.SharedPlatformMaterialType, "material_type", cls.material_type),
+            (platform_models.SharedPlatformAcademicProgram, "academic_program", cls.academic_program),
+        )
+        for through, field, value in section_links:
+            through.objects.create(
+                platform=cls.platform,
+                **{field: value},
+                created_by=cls.system,
+            )
+        platform_models.LinkCheckLog.objects.create(
+            platform=cls.platform,
+            url="https://example.org/scopus",
+            created_by=cls.system,
+        )
+        cls.license = models.License.objects.create(name="CC BY", created_by=cls.system)
 
     def setUp(self):
         self.client.force_authenticate(user=self.system)
@@ -109,6 +140,25 @@ class JournalAPITests(APITestCase):
             )
 
         return journal
+
+    def _complete_for_publication(self, journal):
+        journal.publication_date = "2020-01-01"
+        journal.save(update_fields=["publication_date"])
+        specs = (
+            (models.SharedJournalLanguage, "language", self.language),
+            (models.SharedJournalCountry, "country", self.country),
+            (models.SharedJournalKnowledgeArea, "knowledge_area", self.knowledge_area),
+            (models.SharedJournalMaterialType, "material_type", self.material_type),
+            (models.SharedJournalAcademicProgram, "academic_program", self.academic_program),
+            (models.SharedJournalPlatform, "platform", self.platform),
+            (models.SharedJournalLicense, "license", self.license),
+        )
+        for through, field, value in specs:
+            through.objects.get_or_create(
+                journal=journal,
+                **{field: value},
+                defaults={"created_by": self.system},
+            )
 
     # ==========================================================================
     # CRUD ADMINISTRATIVO
@@ -336,6 +386,7 @@ class JournalAPITests(APITestCase):
             active=False,
             validated=False,
         )
+        self._complete_for_publication(journal)
 
         response = self.client.post(
             f"/api/journals/{journal.pk}/publish/",
@@ -384,6 +435,7 @@ class JournalAPITests(APITestCase):
             active=True,
             validated=True,
         )
+        self._complete_for_publication(journal)
 
         response = self.client.post(
             f"/api/journals/{journal.pk}/deactivate/",
@@ -424,6 +476,7 @@ class JournalAPITests(APITestCase):
             active=True,
             validated=True,
         )
+        self._complete_for_publication(journal)
 
         response = self.client.patch(
             f"/api/journals/{journal.pk}/",
@@ -562,6 +615,7 @@ class JournalAPITests(APITestCase):
             active=True,
             validated=True,
         )
+        self._complete_for_publication(journal)
 
         journal.soft_delete(
             user=self.system,
