@@ -40,6 +40,8 @@ DEFAULT_FROM_EMAIL = os.getenv(
     os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev"),
 )
 RESEND_FROM_EMAIL = DEFAULT_FROM_EMAIL
+HARVESTING_WORKER_PRODUCER_URL = os.getenv("HARVESTING_WORKER_PRODUCER_URL", "")
+HARVESTING_WORKER_TOKEN = os.getenv("HARVESTING_WORKER_TOKEN", "")
 FRONTEND_LOGIN_URL = os.getenv(
     "FRONTEND_LOGIN_URL",
     "https://repositorio-biblioteca-frontend.vercel.app/admin/login",

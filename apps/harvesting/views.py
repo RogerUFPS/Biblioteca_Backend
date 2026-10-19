@@ -1,12 +1,20 @@
 import logging
+import secrets
 
+from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 from rest_framework import serializers as drf_serializers
+from rest_framework.decorators import (
+    action,
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
+from rest_framework.permissions import AllowAny
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.core.viewsets import AuditableViewSet, get_acting_user
@@ -75,17 +83,32 @@ class ScheduleViewSet(AuditableViewSet):
     @extend_schema(
         summary="Procesar cosechas programadas vencidas",
         description=(
-            "Evalúa las programaciones vencidas y ejecuta las cosechas "
-            "correspondientes."
+            "Evalúa las programaciones vencidas y encola sus cosechas para "
+            "procesamiento asíncrono."
         ),
         request=None,
-        responses={200: serializers.HarvestSerializer(many=True)},
+        responses={
+            200: serializers.HarvestSerializer(many=True),
+            202: serializers.HarvestSerializer(many=True),
+            503: serializers.HarvestWorkerErrorSerializer,
+        },
         tags=["Cosecha - Programaciones"],
     )
     @action(detail=False, methods=["post"], url_path="run-due")
     def run_due(self, request):
-        harvests = services.run_scheduled_harvests()
-        return Response(serializers.HarvestSerializer(harvests, many=True).data)
+        try:
+            harvests = services.run_scheduled_harvests()
+        except Exception as exc:
+            logger.exception("No se pudieron encolar las cosechas vencidas.")
+            return Response(
+                {"detail": f"No se pudieron encolar las cosechas: {exc}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        response_status = status.HTTP_202_ACCEPTED if harvests else status.HTTP_200_OK
+        return Response(
+            serializers.HarvestSerializer(harvests, many=True).data,
+            status=response_status,
+        )
 
 
 class ScheduleEventViewSet(viewsets.ReadOnlyModelViewSet):
@@ -137,8 +160,8 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         summary="Pausar una cosecha",
         description=(
-            "Solicita detener la cosecha al terminar la página de OpenAlex que "
-            "está procesando. Una cosecha pendiente se pausa inmediatamente."
+            "Solicita detener la cosecha después del registro que procesa el "
+            "worker. Una cosecha pendiente se pausa inmediatamente."
         ),
         request=None,
         responses={200: serializers.HarvestSerializer, 202: serializers.HarvestSerializer},
@@ -173,9 +196,13 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
 
     @extend_schema(
         summary="Reanudar una cosecha pausada",
-        description="Continúa la recolección desde el cursor guardado en el Harvest.",
+        description="Encola la continuación desde el checkpoint guardado en el Harvest.",
         request=None,
-        responses={200: serializers.HarvestSerializer, 500: serializers.HarvestSerializer},
+        responses={
+            202: serializers.HarvestSerializer,
+            400: serializers.HarvestWorkerErrorSerializer,
+            503: serializers.HarvestWorkerErrorSerializer,
+        },
         tags=["Cosecha - Ejecuciones"],
     )
     @action(detail=True, methods=["post"], url_path="resume")
@@ -209,23 +236,54 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         try:
-            harvest = services.execute_harvest(
-                harvest.pk,
-                user=get_acting_user(request),
-            )
+            harvest = services.dispatch_harvest_to_worker(harvest)
         except Exception as exc:
             logger.exception("Error al reanudar la cosecha #%s", harvest.pk)
             harvest.refresh_from_db()
-            if harvest.state == models.Harvest.State.PENDING:
-                harvest.state = models.Harvest.State.PAUSED
-                harvest.error_message = str(exc)
-                harvest.save(update_fields=["state", "error_message"])
             return Response(
                 {
-                    "detail": f"Error al reanudar la cosecha: {exc}",
+                    "detail": f"Error al encolar la cosecha: {exc}",
                     "harvest": serializers.HarvestSerializer(harvest).data,
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        harvest.refresh_from_db()
-        return Response(serializers.HarvestSerializer(harvest).data)
+        return Response(
+            serializers.HarvestSerializer(harvest).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+@extend_schema(
+    summary="Procesar un paso de cosecha (worker interno)",
+    request=serializers.HarvestWorkerStepSerializer,
+    responses={
+        200: serializers.HarvestWorkerStepResultSerializer,
+        401: serializers.HarvestWorkerErrorSerializer,
+        503: serializers.HarvestWorkerErrorSerializer,
+    },
+    tags=["Cosecha - Workers"],
+)
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def harvest_worker_step(request):
+    worker_token = getattr(settings, "HARVESTING_WORKER_TOKEN", "")
+    if not worker_token:
+        return Response(
+            {"detail": "El acceso de workers no está configurado."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    supplied_token = request.headers.get("Authorization", "")
+    expected_token = f"Bearer {worker_token}"
+    if not secrets.compare_digest(supplied_token, expected_token):
+        return Response(
+            {"detail": "Credenciales de worker inválidas."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    request_serializer = serializers.HarvestWorkerStepSerializer(data=request.data)
+    request_serializer.is_valid(raise_exception=True)
+    result = services.process_harvest_worker_step(
+        **request_serializer.validated_data,
+    )
+    return Response(result)
