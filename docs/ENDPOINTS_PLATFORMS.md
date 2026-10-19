@@ -667,3 +667,41 @@ Etiquetas recomendadas para el Frontend:
 
 Pendiente: evaluar eliminar `Platform.start_period` y `Platform.finish_period`
 si `created_at`, el estado y el historial de auditoría resultan suficientes.
+# Actualización: procedencia, publicación y verificación global
+
+## Crear no publica
+
+`POST /api/platforms/` permite guardar una ficha incompleta y siempre conserva
+el estado `borrador`. Los requisitos estrictos se evalúan en
+`POST /api/platforms/{id}/publish/`: URL pública vigente, sintaxis vigente,
+campos técnicos condicionales y al menos un valor efectivo en institución,
+idioma, país, tipo de material, programa académico y área de conocimiento.
+La publicación no requiere Journals asociadas.
+
+Cada sección administrativa se representa con `id`, `name`, `is_manual`,
+`is_derived` y `editable`. Las cinco secciones compartidas con Journal se
+derivan de todas las Journals activas y validadas; una selección manual se
+conserva cuando desaparece su última fuente derivada.
+
+Los catálogos de secciones admiten filtros contextuales:
+`?platform={id}&origin=manual|derived|both`, `?platform={id}&editable=true|false`
+y `?available_for_platform={id}`. Este último excluye cualquier relación
+vigente, independientemente de su origen.
+
+## Sintaxis similares
+
+`POST /api/platforms/valid-sintaxis/similar/` recibe `booleans`, `parenthesis`
+y `fields`. Devuelve como máximo cinco sintaxis vigentes con similitud mínima
+del 70 %, incluyendo `similarity`, `matching_fields` y `different_fields`.
+Una configuración normalizada idéntica no puede crearse nuevamente; el error
+incluye `existing_id`.
+
+## Enlaces y eliminación
+
+`POST /api/platforms/check-links/` comprueba secuencialmente todas las URLs
+vigentes y responde `204` sin cuerpo. Un fallo individual no detiene los demás
+chequeos. El endpoint existente por Platform conserva su respuesta detallada.
+
+No se puede eliminar una Platform mientras exista una relación vigente con una
+Journal no eliminada, incluso si la Journal está inactiva. Una ValidSintaxis en
+uso por una Platform vigente tampoco puede eliminarse.

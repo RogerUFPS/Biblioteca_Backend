@@ -621,3 +621,26 @@ Pendiente: evaluar que una licencia sea obligatoria para publicar.
 Pendiente: evaluar eliminar `SharedJournalPlatform.start_period` y
 `SharedJournalPlatform.finish_period` si la auditoría (`created_at` y
 `deleted_at`) resulta suficiente como fuente temporal.
+# Actualización: creación y publicación estricta
+
+`POST /api/journals/` permite crear una Journal incompleta, inactiva y sin
+validación. No exige License ni Platform durante la creación. Si se envía una
+asociación nueva con Platform, esa asociación sí requiere `journal_url`.
+
+`POST /api/journals/{id}/publish/` valida atómicamente la ficha final. Requiere
+ISSN, título, editorial, fecha de publicación, todas las secciones de negocio,
+al menos una License vigente y al menos una asociación vigente con una Platform
+publicada. `url_image` no es obligatoria. Si `licenses` se omite se conservan
+las actuales; si se envía se sincroniza el conjunto final, y `licenses: []`
+falla sin dejar cambios parciales.
+
+Los errores distinguen una Journal sin asociaciones vigentes de otra que tiene
+asociaciones pero ninguna Platform publicada. La acción
+`GET /api/journals/{id}/platforms/` admite `platform_is_public=true|false` y
+expone id de relación, id/nombre/status de Platform, `is_public`, URL contextual,
+fechas y vigencia. La API pública solo muestra asociaciones vigentes hacia
+Platforms publicadas.
+
+Eliminar una Journal también establece `active=false` y limpia su validación;
+restaurarla no la republica. Una License utilizada por una Journal vigente no
+puede eliminarse.
