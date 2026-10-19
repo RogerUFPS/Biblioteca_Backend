@@ -237,6 +237,12 @@ last_check != null e is_active = true    → Disponible
 last_check != null e is_active = false   → Error / No disponible
 ```
 
+La API expone esa interpretación directamente mediante
+`verification_status`, cuyos valores son `unverified`, `available` y
+`unavailable`. Un registro nuevo siempre nace con `is_active=false` y
+`last_check=null`; `is_active=false` por sí solo no significa que el chequeo
+haya fallado.
+
 `http_status_code=null` no basta para determinar el estado: puede representar
 una URL aún no verificada o un chequeo fallido sin respuesta HTTP. Cuando sí se
 realiza un chequeo, `last_check` contiene su fecha real. `created_at` solo indica
@@ -248,10 +254,20 @@ descendentes. El orden se aplica antes de la paginación. Los registros sin
 verificar quedan al final y no se mezclan cronológicamente como si fueran
 errores.
 
+La selección de la URL y del estado **vigentes** usa otro criterio: toma el
+evento más reciente por `created_at` e `id` descendentes. De esta forma, una
+URL nueva pendiente sustituye correctamente a la URL anterior ya comprobada,
+sin depender del ordenamiento de valores `NULL` de PostgreSQL.
+
 | Método | Ruta | Uso |
 | --- | --- | --- |
 | GET | `/api/platforms/link-check-logs/` | Listar verificaciones |
 | GET | `/api/platforms/link-check-logs/{id}/` | Consultar una verificación |
+
+El listado admite `verification_status=unverified|available|unavailable`,
+además de `platform`, `journal_platform`, `journal_platform__isnull` e
+`is_active`. Para distinguir una URL pendiente de una fallida debe utilizarse
+`verification_status`, no solamente `is_active=false`.
 
 No existe `POST`, `PUT`, `PATCH` ni `DELETE` público para fabricar resultados
 de verificación. Registrar o cambiar `public_url` crea un registro pendiente;
@@ -637,16 +653,14 @@ Ejemplo de creación/edición: se envían los metadatos y relaciones no académi
 - `public_url` es obligatoria al crear una Platform, pero no es una columna del
   modelo: se registra como `LinkCheckLog` general (`journal_platform=null`).
 - Registrar una URL no equivale a verificarla; `last_check=null` significa que
-  todavía no se ha realizado una comprobación HTTP.
+  todavía no se ha realizado una comprobación HTTP, y el registro nace con
+  `is_active=false`.
 - `POST /api/platforms/{id}/check-link/` verifica la URL pública vigente.
 - `POST /api/platforms/{id}/check-links/` verifica secuencialmente la URL pública
   y la URL vigente de cada relación Journal-Platform no eliminada. Un fallo
   individual no detiene las demás comprobaciones.
-- El historial conserva únicamente resultados; el chequeo masivo no recorre
-  URLs históricas ni relaciones eliminadas.
-
-Pendiente: implementar el chequeo global del sistema mediante un job asíncrono.
-No se implementa un recorrido global síncrono.
+- El historial conserva registros pendientes y resultados de verificación; el
+  chequeo masivo no recorre URLs históricas ni relaciones eliminadas.
 
 También continúa pendiente cualquier regla adicional para derivar o sincronizar
 idiomas de Platform; esta fase no modifica ese comportamiento.
@@ -671,12 +685,18 @@ si `created_at`, el estado y el historial de auditoría resultan suficientes.
 
 ## Crear no publica
 
-`POST /api/platforms/` permite guardar una ficha incompleta y siempre conserva
-el estado `borrador`. Los requisitos estrictos se evalúan en
-`POST /api/platforms/{id}/publish/`: URL pública vigente, sintaxis vigente,
+`POST /api/platforms/` requiere `name` y `public_url`, permite que el resto de
+la ficha permanezca incompleto y siempre conserva el estado `borrador`. La URL
+queda registrada en `LinkCheckLog` para su verificación. Los demás requisitos estrictos se evalúan en
+`POST /api/platforms/{id}/publish/`: URL pública vigente y verificada con un
+último resultado exitoso, sintaxis vigente,
 campos técnicos condicionales y al menos un valor efectivo en institución,
 idioma, país, tipo de material, programa académico y área de conocimiento.
 La publicación no requiere Journals asociadas.
+
+Si la URL vigente nunca fue comprobada, `publish` indica que debe verificarse.
+Si ya fue comprobada pero su último resultado falló, indica que no se encuentra
+disponible y debe corregirse o verificarse nuevamente.
 
 Cada sección administrativa se representa con `id`, `name`, `is_manual`,
 `is_derived` y `editable`. Las cinco secciones compartidas con Journal se

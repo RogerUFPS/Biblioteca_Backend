@@ -1,4 +1,4 @@
-# Pruebas de la Aplicación `journal` (Fase A)
+# Pruebas de la Aplicación `journal`
 
 Estas pruebas documentan y validan el comportamiento integral del módulo `journal` sin autenticación obligatoria del cliente, utilizando el usuario del sistema con `code=0`.
 
