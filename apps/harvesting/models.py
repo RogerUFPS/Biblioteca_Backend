@@ -138,6 +138,22 @@ class Harvest(AuditableModel):
         help_text="Respuesta de página pendiente para continuar sin volver a solicitarla.",
     )
 
+    worker_checkpoint = models.PositiveIntegerField(
+        default=0,
+        help_text="Versión del progreso procesada por los workers; evita pasos duplicados.",
+    )
+
+    worker_elapsed_milliseconds = models.PositiveBigIntegerField(
+        default=0,
+        help_text="Tiempo activo acumulado procesando pasos del worker.",
+    )
+
+    worker_dispatched_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Último despacho o paso confirmado por el worker de cosecha.",
+    )
+
     max_quantity = models.PositiveIntegerField(
         null=True,
         blank=True,

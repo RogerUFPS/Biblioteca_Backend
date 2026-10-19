@@ -1,3 +1,4 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 from . import views
 
@@ -21,4 +22,7 @@ router.register(
     basename="harvest",
 )
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("worker/step/", views.harvest_worker_step, name="harvest-worker-step"),
+    *router.urls,
+]
