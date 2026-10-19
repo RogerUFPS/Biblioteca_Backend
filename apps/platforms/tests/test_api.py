@@ -77,12 +77,41 @@ class PlatformAPITests(APITestCase):
         """Helper para obtener el payload asegurando el tipado estático."""
         return getattr(response, "data", {})
 
+    def test_similar_syntax_returns_explainable_exact_match(self):
+        response = self.client.post(
+            "/api/platforms/valid-sintaxis/similar/",
+            {
+                "booleans": ["AND", "OR"],
+                "parenthesis": True,
+                "fields": {"title": "ti"},
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["id"], self.sintaxis.pk)
+        self.assertEqual(result["similarity"], 100)
+        self.assertEqual(result["different_fields"], [])
+
+    def test_platform_can_be_created_incomplete_as_draft(self):
+        response = self.client.post(
+            "/api/platforms/",
+            {
+                "name": "borrador incompleto",
+                "public_url": "https://8.8.8.8/draft",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], models.Platform.Status.BORRADOR)
+
     def _setup_complete_platform(
         self,
         name="Plataforma API Test",
     ):
         platform = models.Platform.objects.create(
             name=name,
+            url_image="https://example.org/platform.png",
             is_harvestable=True,
             base_api_url="https://api.test.org",
             valid_sintaxis=self.sintaxis,
@@ -133,6 +162,7 @@ class PlatformAPITests(APITestCase):
             fail_count=0,
             http_status_code=200,
             is_active=True,
+            last_check=timezone.now(),
             created_by=self.system,
         )
 
@@ -428,6 +458,10 @@ class PlatformAPITests(APITestCase):
         second_page_data = self._get_data(second_page)
         self.assertEqual(second_page_data["results"][0]["id"], pending.pk)
         self.assertIsNone(second_page_data["results"][0]["last_check"])
+        self.assertFalse(second_page_data["results"][0]["is_active"])
+        self.assertEqual(
+            second_page_data["results"][0]["verification_status"], "unverified"
+        )
 
     def test_link_history_uses_created_at_and_id_as_tiebreakers(self):
         platform = models.Platform.objects.create(
@@ -461,6 +495,38 @@ class PlatformAPITests(APITestCase):
             [item["id"] for item in data["results"]],
             [second.pk, first.pk],
         )
+
+    def test_link_history_filters_by_verification_status(self):
+        platform = models.Platform.objects.create(
+            name="Historial por estado",
+            created_by=self.system,
+        )
+        states = (
+            ("unverified", False, None),
+            ("available", True, timezone.now()),
+            ("unavailable", False, timezone.now()),
+        )
+        expected_ids = {}
+        for state, is_active, last_check in states:
+            log = models.LinkCheckLog.objects.create(
+                platform=platform,
+                url=f"https://8.8.8.8/{state}",
+                is_active=is_active,
+                last_check=last_check,
+                created_by=self.system,
+            )
+            expected_ids[state] = log.pk
+
+        for state, expected_id in expected_ids.items():
+            response = self.client.get(
+                f"/api/platforms/link-check-logs/?platform={platform.pk}"
+                f"&verification_status={state}"
+            )
+            data = self._get_data(response)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(data["total_items"], 1)
+            self.assertEqual(data["results"][0]["id"], expected_id)
+            self.assertEqual(data["results"][0]["verification_status"], state)
 
     @patch("apps.platforms.services._perform_link_check", return_value=(200, True))
     @patch("apps.platforms.services._validate_safe_http_url")
@@ -498,6 +564,8 @@ class PlatformAPITests(APITestCase):
         self.assertEqual(history["last_check"], checked["last_check"])
         self.assertEqual(link_status["is_active"], history["is_active"])
         self.assertEqual(link_status["last_check"], history["last_check"])
+        self.assertEqual(history["verification_status"], "available")
+        self.assertEqual(link_status["verification_status"], "available")
 
     def test_link_history_can_exclude_journal_urls(self):
         platform = models.Platform.objects.create(

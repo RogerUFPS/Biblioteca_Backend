@@ -40,6 +40,10 @@ class PlatformClassificationTests(TestCase):
             journal_models.SharedJournalAcademicProgram.objects.create(
                 journal=journal, academic_program=self.program, created_by=self.user
             )
+            journal_models.SharedJournalKnowledgeArea.objects.create(
+                journal=journal, knowledge_area=self.area,
+                is_derived=True, created_by=self.user
+            )
             journal_models.SharedJournalPlatform.objects.create(
                 journal=journal, platform=platform, created_by=self.user
             )
@@ -54,6 +58,11 @@ class PlatformClassificationTests(TestCase):
                 .values_list("knowledge_area_id", flat=True)),
             {self.area.pk},
         )
+        link = models.SharedPlatformAcademicProgram.objects.get(
+            platform=platform, academic_program=self.program,
+        )
+        self.assertFalse(link.is_manual)
+        self.assertTrue(link.is_derived)
 
     def test_incomplete_eligible_classification_moves_published_to_draft(self):
         platform = models.Platform.objects.create(
@@ -69,3 +78,30 @@ class PlatformClassificationTests(TestCase):
         self.assertEqual(platform.status, models.Platform.Status.BORRADOR)
         self.assertIsNone(platform.validated_by)
         self.assertIsNone(platform.validated_at)
+
+    def test_effective_manual_journal_area_is_derived_in_platform(self):
+        platform = models.Platform.objects.create(
+            name="platform manual journal area", created_by=self.user
+        )
+        journal = self._journal("4444-4444", eligible=True)
+        manual_area = KnowledgeArea.objects.create(
+            name="area manual journal", created_by=self.user
+        )
+        journal_models.SharedJournalKnowledgeArea.objects.create(
+            journal=journal,
+            knowledge_area=manual_area,
+            is_manual=True,
+            is_derived=False,
+            created_by=self.user,
+        )
+        journal_models.SharedJournalPlatform.objects.create(
+            journal=journal, platform=platform, created_by=self.user
+        )
+
+        recalculate_platforms([platform.pk], user=self.user)
+
+        link = models.SharedPlatformKnowledgeArea.objects.get(
+            platform=platform, knowledge_area=manual_area
+        )
+        self.assertFalse(link.is_manual)
+        self.assertTrue(link.is_derived)

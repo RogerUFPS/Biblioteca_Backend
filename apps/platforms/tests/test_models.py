@@ -105,6 +105,7 @@ class PlatformModelsTests(TestCase):
             fail_count=1,
             http_status_code=500,
             is_active=False,
+            last_check=timezone.now() - datetime.timedelta(minutes=1),
             created_by=self.system,
         )
         log2 = LinkCheckLog.objects.create(
@@ -113,11 +114,26 @@ class PlatformModelsTests(TestCase):
             fail_count=0,
             http_status_code=200,
             is_active=True,
+            last_check=timezone.now(),
             created_by=self.system,
         )
         logs = list(platform.link_check_logs.all())
         self.assertEqual(logs[0].pk, log2.pk)
         self.assertEqual(logs[1].pk, log1.pk)
+
+    def test_link_check_log_cannot_be_active_without_check(self):
+        platform = Platform.objects.create(
+            name="Enlace sin verificar",
+            created_by=self.system,
+        )
+
+        with self.assertRaises(ValidationError):
+            LinkCheckLog.objects.create(
+                platform=platform,
+                url="https://example.org/pending",
+                is_active=True,
+                created_by=self.system,
+            )
 
     def test_shared_platform_unique_constraint(self):
         """Verifica que no se dupliquen relaciones compuestas entre plataforma y catalogo."""

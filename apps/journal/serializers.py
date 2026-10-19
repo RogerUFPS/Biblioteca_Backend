@@ -38,11 +38,6 @@ JOURNAL_RELATION_CONFIG = (
         relation_field="country",
     ),
     RelationConfig(
-        data_field="knowledge_areas",
-        through_model=models.SharedJournalKnowledgeArea,
-        relation_field="knowledge_area",
-    ),
-    RelationConfig(
         data_field="material_types",
         through_model=models.SharedJournalMaterialType,
         relation_field="material_type",
@@ -118,6 +113,10 @@ def _represent_journal_platform(link, *, include_relation_key=False):
     }
     if include_relation_key:
         data["platform"] = link.platform_id
+        data["relation_id"] = link.pk
+        data["status"] = link.platform.status
+        data["is_public"] = link.platform.status == Platform.Status.PUBLICADO
+        data["is_current"] = not link.is_deleted and link.finish_period is None
     return data
 
 
@@ -263,6 +262,62 @@ class JournalPlatformRelationSerializer(
         return attrs
 
 
+class JournalKnowledgeAreaOriginSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    is_manual = serializers.BooleanField()
+    is_derived = serializers.BooleanField()
+    editable = serializers.BooleanField()
+
+
+@extend_schema_field(JournalKnowledgeAreaOriginSerializer(many=True))
+class JournalKnowledgeAreasField(serializers.Field):
+    """Entrada por IDs y salida administrativa con procedencia."""
+
+    def get_attribute(self, instance):
+        return instance
+
+    def to_internal_value(self, data):
+        if not isinstance(data, list):
+            raise serializers.ValidationError(
+                "Se esperaba una lista de IDs de áreas de conocimiento."
+            )
+        if any(
+            not isinstance(area_id, int) or isinstance(area_id, bool)
+            for area_id in data
+        ):
+            raise serializers.ValidationError(
+                "Cada área de conocimiento debe identificarse con un ID entero."
+            )
+        if len(data) != len(set(data)):
+            raise serializers.ValidationError(
+                "Un área de conocimiento no puede aparecer más de una vez."
+            )
+        areas = list(KnowledgeArea.objects.filter(pk__in=data))
+        if len(areas) != len(data):
+            raise serializers.ValidationError(
+                "Una o más áreas de conocimiento no existen o no están vigentes."
+            )
+        by_id = {area.pk: area for area in areas}
+        return [by_id[area_id] for area_id in data]
+
+    def to_representation(self, journal):
+        return [
+            {
+                "id": link.knowledge_area_id,
+                "name": link.knowledge_area.name,
+                "is_manual": link.is_manual,
+                "is_derived": link.is_derived,
+                "editable": link.editable,
+            }
+            for link in journal.knowledge_area_links.select_related(
+                "knowledge_area"
+            ).filter(knowledge_area__deleted_at__isnull=True).order_by(
+                "knowledge_area__name"
+            )
+        ]
+
+
 class JournalSerializer(
     SoftDeleteRelationSyncMixin,
     ArchivedNameMixin,
@@ -305,12 +360,11 @@ class JournalSerializer(
         write_only=True,
     )
 
-    knowledge_areas = serializers.ListField(
-        child=serializers.IntegerField(),
-        read_only=True,
+    knowledge_areas = JournalKnowledgeAreasField(
+        required=False,
         help_text=(
-            "Áreas del conocimiento derivadas automáticamente de los "
-            "programas académicos asociados."
+            "Lista de IDs para la selección manual. La respuesta incluye "
+            "procedencia y editabilidad de todas las áreas efectivas."
         ),
     )
 
@@ -366,7 +420,6 @@ class JournalSerializer(
             "validated_by",
             "validated_at",
             "fetched_at",
-            "knowledge_areas",
         ]
 
     def validate_issn(self, value):
@@ -396,11 +449,6 @@ class JournalSerializer(
                 None,
             )
         )
-
-        if base_instance is None and not attrs.get("platforms"):
-            raise serializers.ValidationError({
-                "platforms": "Una revista nueva requiere al menos una plataforma."
-            })
 
         return attrs
 
@@ -446,7 +494,12 @@ class JournalSerializer(
         Si academic_programs no viene en un PATCH, ninguna de las dos
         relaciones se modifica.
         """
-        return self._extract_relation_data(validated_data)
+        relation_data = self._extract_relation_data(validated_data)
+        if "knowledge_areas" in validated_data:
+            relation_data["knowledge_areas"] = validated_data.pop(
+                "knowledge_areas"
+            )
+        return relation_data
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
@@ -554,6 +607,13 @@ class JournalSerializer(
                 parent=journal,
                 relation_data=relation_data,
             )
+            if "knowledge_areas" in relation_data:
+                from .classification import sync_manual_knowledge_areas
+                sync_manual_knowledge_areas(
+                    journal,
+                    relation_data["knowledge_areas"],
+                    user=journal.created_by,
+                )
             self._sync_platform_urls(
                 journal,
                 relation_data.get("platforms"),
@@ -601,6 +661,13 @@ class JournalSerializer(
                 parent=journal,
                 relation_data=relation_data,
             )
+            if "knowledge_areas" in relation_data:
+                from .classification import sync_manual_knowledge_areas
+                sync_manual_knowledge_areas(
+                    journal,
+                    relation_data["knowledge_areas"],
+                    user=journal.updated_by or journal.created_by,
+                )
             self._sync_platform_urls(
                 journal,
                 relation_data.get("platforms"),

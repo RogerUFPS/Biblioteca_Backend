@@ -175,6 +175,16 @@ class SharedJournalCountry(AuditableModel):
 
 class SharedJournalKnowledgeArea(AuditableModel):
 
+    is_manual = models.BooleanField(
+        default=False,
+        help_text="Indica si el área fue seleccionada manualmente en la revista.",
+    )
+
+    is_derived = models.BooleanField(
+        default=False,
+        help_text="Indica si el área proviene de programas académicos vigentes.",
+    )
+
     journal = models.ForeignKey(
         Journal,
         on_delete=models.PROTECT,
@@ -193,11 +203,41 @@ class SharedJournalKnowledgeArea(AuditableModel):
             models.UniqueConstraint(
                 fields=["journal", "knowledge_area"],
                 name="unique_journal_knowledge_area",
-            )
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(deleted_at__isnull=False)
+                    | models.Q(is_manual=True)
+                    | models.Q(is_derived=True)
+                ),
+                name="journal_area_active_has_origin",
+            ),
         ]
 
     def __str__(self):
         return f"{self.journal} <-> {self.knowledge_area}"
+
+    @property
+    def editable(self):
+        return self.is_manual and not self.is_derived
+
+    def soft_delete(self, user, explanation: str):
+        if not explanation or not explanation.strip():
+            raise ValueError("Se requiere una explicación para eliminar.")
+        self.is_manual = False
+        self.is_derived = False
+        self.deleted_by = user
+        self.deleted_at = timezone.now()
+        self.delete_explanation = explanation.strip()
+        self.save(update_fields=[
+            "is_manual", "is_derived", "deleted_by", "deleted_at",
+            "delete_explanation",
+        ])
+
+    def restore(self):
+        raise ValueError(
+            "SharedJournalKnowledgeArea debe restaurarse indicando su procedencia."
+        )
 
 
 class SharedJournalMaterialType(AuditableModel):

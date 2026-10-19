@@ -20,7 +20,7 @@ from apps.core.viewsets import (
 )
 from apps.core.pagination import CustomPageNumberPagination
 
-from . import filters, models, serializers, services
+from . import classification, filters, models, serializers, services
 
 
 def _with_public_link_logs(queryset):
@@ -138,6 +138,38 @@ class ValidSintaxisViewSet(AuditableViewSet):
         "created_at",
     ]
 
+    def destroy(self, request, *args, **kwargs):
+        syntax = self.get_object()
+        if syntax.platforms.filter(deleted_at__isnull=True).exists():
+            return Response(
+                {"detail": (
+                    "No se puede eliminar el registro porque está siendo utilizado "
+                    "por otros registros vigentes."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Buscar sintaxis vigentes similares",
+        request=serializers.ValidSintaxisSimilarityRequestSerializer,
+        responses={200: inline_serializer(
+            name="ValidSintaxisSimilarityResponse",
+            fields={
+                "results": serializers.ValidSintaxisSimilarityResultSerializer(many=True),
+            },
+        )},
+        tags=["Plataformas - Sintaxis"],
+    )
+    @action(detail=False, methods=["post"], url_path="similar")
+    def similar(self, request):
+        body = serializers.ValidSintaxisSimilarityRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        return Response(
+            {"results": services.similar_syntaxes(body.validated_data)},
+            status=status.HTTP_200_OK,
+        )
+
 
 # ==============================================================================
 # HISTORIAL DE VERIFICACIÓN DE ENLACES
@@ -151,7 +183,9 @@ class ValidSintaxisViewSet(AuditableViewSet):
             "los enlaces de las plataformas. Por defecto muestra primero "
             "las verificaciones más recientes y deja al final los registros "
             "todavía no verificados. Use journal_platform__isnull=true para "
-            "consultar únicamente URLs públicas generales."
+            "consultar únicamente URLs públicas generales y "
+            "verification_status=unverified|available|unavailable para "
+            "distinguir su estado semántico."
         ),
         parameters=[
             OpenApiParameter(
@@ -188,11 +222,7 @@ class LinkCheckLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = serializers.LinkCheckLogSerializer
     pagination_class = CustomPageNumberPagination
 
-    filterset_fields = {
-        "platform": ["exact"],
-        "journal_platform": ["exact", "isnull"],
-        "is_active": ["exact"],
-    }
+    filterset_class = filters.LinkCheckLogFilter
 
     ordering_fields = [
         "last_check",
@@ -308,6 +338,18 @@ class PlatformViewSet(AuditableViewSet):
         "finish_period",
         "created_at",
     ]
+
+    def destroy(self, request, *args, **kwargs):
+        platform = self.get_object()
+        if platform.journal_links.filter(journal__deleted_at__isnull=True).exists():
+            return Response(
+                {"detail": (
+                    "No se puede eliminar la plataforma porque tiene revistas "
+                    "asociadas. Desvincule primero las revistas de la plataforma."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
         summary="Publicar plataforma",
@@ -463,6 +505,7 @@ class PlatformViewSet(AuditableViewSet):
 
     @extend_schema(
         summary="Verificar todos los enlaces vigentes de una plataforma",
+        operation_id="platform_check_links",
         request=None,
         responses={200: serializers.PlatformLinksCheckResponseSerializer},
         tags=["Plataformas - Verificación de enlaces"],
@@ -475,6 +518,18 @@ class PlatformViewSet(AuditableViewSet):
         )
         data = serializers.PlatformLinksCheckResponseSerializer(result).data
         return Response(data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Verificar todos los enlaces vigentes del sistema",
+        operation_id="platform_check_links_global",
+        request=None,
+        responses={204: None},
+        tags=["Plataformas - Verificación de enlaces"],
+    )
+    @action(detail=False, methods=["post"], url_path="check-links")
+    def check_all_links(self, request):
+        services.check_all_current_links(user=get_acting_user(request))
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(
         summary="Restaurar plataforma eliminada",
@@ -535,6 +590,7 @@ class PlatformViewSet(AuditableViewSet):
                 "updated_at",
             ]
         )
+        classification.recalculate_platforms([instance.pk], user=acting_user)
 
         return Response(
             self.get_serializer(instance).data,

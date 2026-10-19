@@ -101,10 +101,16 @@ class JournalFilterTests(APITestCase):
             ),
         )
         for through_model, field_name, related in relation_specs:
+            origin = (
+                {"is_derived": True}
+                if through_model is models.SharedJournalKnowledgeArea
+                else {}
+            )
             through_model.objects.create(
                 journal=cls.public_journal,
                 created_by=cls.user,
                 **{field_name: related},
+                **origin,
             )
 
         cls.platform_link = models.SharedJournalPlatform.objects.create(

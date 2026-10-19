@@ -1,4 +1,5 @@
 from datetime import date
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -361,12 +362,12 @@ class JournalSerializersTests(TestCase):
             },
         )
 
-    def test_knowledge_areas_are_not_writeable(self):
+    def test_knowledge_areas_accept_manual_selection(self):
         serializer = serializers.JournalSerializer(
             data={
                 "issn": "3456-7890",
                 "title": "Journal Read Only",
-                "knowledge_areas": [999999],
+                "knowledge_areas": [self.knowledge_area_secondary.pk],
                 "academic_programs": [self.academic_program.pk],
                 "platforms": [{
                     "platform": self.platform.pk,
@@ -379,14 +380,16 @@ class JournalSerializersTests(TestCase):
         journal = serializer.save(created_by=self.system)
 
         self.assertEqual(
-            list(
-                journal.knowledge_area_links.values_list(
-                    "knowledge_area_id",
-                    flat=True,
-                )
-            ),
-            [self.knowledge_area.pk],
+            set(journal.knowledge_area_links.values_list(
+                "knowledge_area_id", flat=True,
+            )),
+            {self.knowledge_area.pk, self.knowledge_area_secondary.pk},
         )
+        manual = journal.knowledge_area_links.get(
+            knowledge_area=self.knowledge_area_secondary
+        )
+        self.assertTrue(manual.is_manual)
+        self.assertFalse(manual.is_derived)
 
     def test_patch_without_academic_programs_preserves_derived_relations(self):
         journal = self._journal(
@@ -1041,6 +1044,7 @@ class JournalSerializersTests(TestCase):
         models.SharedJournalKnowledgeArea.objects.create(
             journal=journal,
             knowledge_area=self.knowledge_area,
+            is_derived=True,
             created_by=self.system,
         )
 
@@ -1318,3 +1322,24 @@ class JournalSerializersTests(TestCase):
         self.assertEqual(draft_platform.status, Platform.Status.BORRADOR)
         self.assertIsNone(draft_platform.validated_by)
         self.assertIsNone(draft_platform.validated_at)
+
+    def test_program_change_recalculates_journal_before_platform(self):
+        journal = self._journal(issn="9234-5678")
+        calls = []
+        serializer = serializers.JournalSerializer(
+            journal,
+            data={"academic_programs": [self.academic_program.pk]},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        with patch(
+            "apps.journal.classification.recalculate_journals",
+            side_effect=lambda *args, **kwargs: calls.append("journal"),
+        ), patch(
+            "apps.platforms.classification.recalculate_platforms",
+            side_effect=lambda *args, **kwargs: calls.append("platform"),
+        ):
+            serializer.save(updated_by=self.system)
+
+        self.assertEqual(calls, ["journal", "platform"])

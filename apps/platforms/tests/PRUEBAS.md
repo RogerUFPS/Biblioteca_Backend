@@ -1,15 +1,16 @@
-# Pruebas de la Aplicación `platforms` (Fase A)
+# Pruebas de la Aplicación `platforms`
 
 Estas pruebas documentan y validan el comportamiento integral del módulo `platforms` sin autenticación obligatoria del cliente, utilizando el usuario del sistema con `code=0`.
 
-**Cobertura actual: 50 pruebas** distribuidas entre modelos, serializadores,
-servicios, clasificación y API.
+La cobertura se distribuye entre modelos, filtros, serializadores, servicios,
+clasificación y API. La cantidad exacta se obtiene al ejecutar la suite, para
+evitar mantener un contador manual desactualizado.
 
 ---
 
 ## 1. Reglas funcionales verificadas
 
-Durante la evolución de la Fase A se ajustaron varias reglas de negocio importantes del módulo `platforms`. Las pruebas actuales deben interpretarse bajo estas reglas:
+Durante la evolución del módulo se ajustaron varias reglas de negocio importantes de `platforms`. Las pruebas actuales deben interpretarse bajo estas reglas:
 
 ### 1.1. API Key y `base_api_url`
 
@@ -39,9 +40,13 @@ Por tanto:
 
 - `base_api_url` y `LinkCheckLog.url` tienen propósitos diferentes.
 - `LinkCheckLog.url` es la URL pública que se presenta/verifica para acceso a la plataforma.
-- Una plataforma debe tener una URL pública registrada en `LinkCheckLog` para poder pasar a `PUBLICADO`.
+- Una plataforma debe tener una URL pública registrada, comprobada y disponible
+  en `LinkCheckLog` para poder pasar a `PUBLICADO`.
 - La verificación de enlaces utiliza la URL pública registrada y no `base_api_url`.
 - `fail_count` se controla por URL y se reinicia cuando una verificación resulta exitosa.
+- Todo registro nuevo nace con `is_active=False` y `last_check=null`. El estado
+  se interpreta como `unverified`, `available` o `unavailable` combinando ambos
+  campos.
 
 ### 1.3. Programas académicos y áreas del conocimiento
 
@@ -99,7 +104,8 @@ Una plataforma que no tenga API de cosecha puede publicarse siempre que cumpla l
 | `test_platform_name_normalized_to_lowercase` | El nombre se normaliza a minúsculas y se eliminan espacios redundantes mediante `AuditableModel`. |
 | `test_platform_name_case_insensitive_unique_constraint` | La base de datos rechaza nombres duplicados sin importar mayúsculas/minúsculas mediante la restricción de unicidad correspondiente. |
 | `test_valid_sintaxis_creation_and_soft_delete` | Se validan los campos JSON de `ValidSintaxis` y su ciclo de Soft Delete, conservando el registro en `all_objects`. |
-| `test_link_check_log_fail_count_and_ordering` | `LinkCheckLog` registra las verificaciones y mantiene el ordenamiento esperado por fecha de chequeo y creación. |
+| `test_link_check_log_fail_count_and_ordering` | `LinkCheckLog` registra las verificaciones y mantiene un orden determinista por creación e identificador. |
+| `test_link_check_log_cannot_be_active_without_check` | Impide representar una URL como disponible cuando nunca ha sido comprobada. |
 | `test_shared_platform_unique_constraint` | Se valida la unicidad compuesta de las relaciones intermedias, evitando asociaciones duplicadas. |
 
 ### 2.2. Serializadores (`apps/platforms/tests/test_serializers.py`)
@@ -136,6 +142,9 @@ Una plataforma que no tenga API de cosecha puede publicarse siempre que cumpla l
 | `test_non_harvestable_platform_can_be_published_without_api_url` | Una Platform no cosechable puede publicarse sin `base_api_url`. |
 | `test_harvestable_platform_cannot_be_published_without_api_url` | Una Platform cosechable no puede publicarse sin URL técnica. |
 | `test_publish_platform_fails_when_incomplete` | Lanza `ValidationError` detallando los campos o relaciones obligatorias que faltan. La ausencia de `base_api_url` por sí sola no genera error cuando no existe API Key. |
+| `test_publish_requires_public_url_to_be_verified` | Rechaza la publicación cuando la URL vigente todavía no ha sido comprobada. |
+| `test_publish_rejects_unavailable_public_url` | Rechaza la publicación con un mensaje distinto cuando el último chequeo falló. |
+| `test_registered_url_starts_unverified` | Registra una URL nueva con `is_active=False` y `last_check=null`. |
 | `test_lifecycle_transitions_obsolete_and_reactivate` | Transición controlada `BORRADOR` → `PUBLICADO` → `OBSOLETO` → `BORRADOR`, limpiando la validación al reactivar. |
 | `test_validate_safe_http_url_blocks_internal_and_private_ips` | Protección preventiva contra SSRF bloqueando `localhost`, `127.0.0.1` y rangos privados. |
 | `test_check_platform_link_records_consecutive_fail_count` | Registra la URL pública en `LinkCheckLog`, incrementa `fail_count` ante fallos consecutivos y lo reinicia a `0` ante una respuesta exitosa. |
@@ -155,6 +164,7 @@ Una plataforma que no tenga API de cosecha puede publicarse siempre que cumpla l
 | `test_link_history_uses_created_at_and_id_as_tiebreakers` | Los empates de `last_check` se resuelven de forma determinística con `created_at` e identificador descendentes. |
 | `test_successful_check_is_consistent_with_history` | Un chequeo HTTP 200 coincide en la respuesta de la acción, el historial y `link_status`. |
 | `test_link_history_can_exclude_journal_urls` | El filtro `journal_platform__isnull=true` separa el historial general de las URLs contextuales de Journals. |
+| `test_link_history_filters_by_verification_status` | Distingue en el historial URLs sin verificar, disponibles y no disponibles. |
 
 ### 2.5. Clasificación derivada (`apps/platforms/tests/test_classification.py`)
 
@@ -162,6 +172,7 @@ Una plataforma que no tenga API de cosecha puede publicarse siempre que cumpla l
 | --- | --- |
 | `test_uses_only_eligible_journals` | Solo las Journals activas, validadas, no eliminadas y con relación activa aportan clasificación. |
 | `test_incomplete_eligible_classification_moves_published_to_draft` | Una clasificación elegible incompleta devuelve una Platform publicada a `BORRADOR` y limpia su validación. |
+| `test_effective_manual_journal_area_is_derived_in_platform` | Un área manual efectiva de Journal se propaga como derivada al nivel Platform. |
 
 ---
 
@@ -208,7 +219,7 @@ y ser publicada como plataforma de referencia.
 
 ## 4. Ciclo de vida de una plataforma
 
-El ciclo de vida validado durante la Fase A es:
+El ciclo de vida validado actualmente es:
 
 ```text
 BORRADOR
@@ -274,19 +285,10 @@ Los serializers públicos no deben exponer:
 
 ---
 
-## 6. Estado actual de la Fase A
+## 6. Estado actual de las pruebas
 
-La suite actual contiene 47 pruebas:
-
-```text
-Modelos:           6
-Serializadores:   21
-Servicios:         7
-Clasificación:     2
-API:              11
---------------------
-TOTAL:             47
-```
+La suite cubre modelos, filtros, serializadores, servicios, clasificación y
+API. El runner de Django informa el total vigente al inicio de cada ejecución.
 
 ---
 
@@ -320,7 +322,7 @@ La bandera `--keepdb` permite reutilizar la base de datos temporal de pruebas y 
 
 ---
 
-## 8. Resultado de la Fase A
+## 8. Resultado de las pruebas
 
 La aplicación `platforms` queda validada para continuar con la siguiente fase de desarrollo.
 
@@ -340,7 +342,7 @@ Las reglas principales verificadas son:
 - Filtros y endpoints públicos.
 - Documentación de la API mediante Swagger/OpenAPI.
 
-**Cobertura documentada: 47 pruebas para la Fase A de `platforms`.**
+La cobertura documentada corresponde al comportamiento vigente de `platforms`.
 ## Fase estructural: URLs obligatorias y chequeo por Platform
 
 La creación administrativa exige `public_url` y comprueba que su registro sea
@@ -370,3 +372,10 @@ resultados independientes ante fallos parciales.
 
 El endpoint público no incorpora `status`, porque su queryset ya restringe el
 resultado a `PUBLICADO`.
+# Cobertura de la ampliación de reglas
+
+La fase incluye ahora escenarios para creación incompleta en borrador,
+publicación con secciones efectivas, procedencia manual/derivada, recálculo
+desde Journals elegibles, sintaxis similares y verificación global de enlaces.
+También deben comprobarse los filtros contextuales de catálogos y los bloqueos
+de eliminación de Platform y ValidSintaxis en uso.
