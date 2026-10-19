@@ -172,6 +172,7 @@ Una plataforma que no tenga API de cosecha puede publicarse siempre que cumpla l
 | --- | --- |
 | `test_uses_only_eligible_journals` | Solo las Journals activas, validadas, no eliminadas y con relación activa aportan clasificación. |
 | `test_incomplete_eligible_classification_moves_published_to_draft` | Una clasificación elegible incompleta devuelve una Platform publicada a `BORRADOR` y limpia su validación. |
+| `test_effective_manual_journal_area_is_derived_in_platform` | Un área manual efectiva de Journal se propaga como derivada al nivel Platform. |
 
 ---
 

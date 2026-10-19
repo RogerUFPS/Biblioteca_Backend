@@ -36,10 +36,11 @@ servicios, clasificación y API.
 | `test_journal_serializer_rejects_invalid_issn` | Rechaza un ISSN con formato inválido mediante error de validación. |
 | `test_sync_relations_deduplicates_repeated_ids` | IDs repetidos en las relaciones no generan registros duplicados en las tablas intermedias. |
 | `test_knowledge_areas_are_derived_from_academic_programs` | Las áreas del conocimiento se generan automáticamente a partir de los programas académicos seleccionados. |
-| `test_knowledge_areas_are_not_writeable` | El campo `knowledge_areas` no puede utilizarse para asignar manualmente áreas del conocimiento; su valor de salida corresponde exclusivamente a las áreas derivadas. |
+| `test_knowledge_areas_accept_manual_selection` | Permite seleccionar áreas manuales y combinarlas sin duplicados con las derivadas. |
 | `test_patch_without_academic_programs_preserves_derived_relations` | Un `PATCH` que no incluye `academic_programs` conserva los programas existentes y sus áreas del conocimiento derivadas. |
 | `test_empty_academic_programs_clears_derived_knowledge_areas` | Enviar `academic_programs: []` elimina lógicamente las relaciones con programas y elimina las áreas derivadas que dejan de corresponder. |
 | `test_changing_academic_programs_recalculates_knowledge_areas` | Cambiar los programas académicos recalcula las áreas del conocimiento, realizando una unión sin duplicados. |
+| `test_program_change_recalculates_journal_before_platform` | Garantiza el orden de coordinación Journal antes de Platform. |
 | `test_removed_relations_are_soft_deleted_and_hidden` | Las relaciones retiradas mediante una lista vacía se eliminan lógicamente y dejan de aparecer en la representación activa. |
 | `test_archived_relation_is_restored` | Una relación previamente eliminada mediante Soft Delete se restaura al volver a incluirla en el payload. |
 | `test_platform_relation_updates_extra_fields` | Actualiza correctamente los atributos propios de `SharedJournalPlatform`, incluyendo períodos y disponibilidad de texto completo. |
@@ -69,6 +70,8 @@ servicios, clasificación y API.
 | `test_areas_are_full_union_without_duplicates` | Las áreas derivadas corresponden a la unión completa de las áreas de los programas, sin duplicados. |
 | `test_equal_effective_result_does_not_invalidate` | Un recálculo con el mismo resultado efectivo no invalida innecesariamente la Journal. |
 | `test_derived_link_is_soft_deleted_and_restored` | Las relaciones derivadas se eliminan lógicamente y se restauran cuando vuelven a ser necesarias. |
+| `test_manual_area_becomes_derived_and_returns_to_editable` | Conserva ambos orígenes y devuelve editabilidad cuando desaparece la última derivación. |
+| `test_manual_removal_soft_deletes_and_resets_origins` | El Soft Delete de una relación sin fuentes limpia ambos flags. |
 
 ---
 
@@ -108,7 +111,9 @@ servicios, clasificación y API.
 | Prueba | Resultado Esperado |
 | --- | --- |
 | `test_create_journal_endpoint` | `POST /api/journals/` crea una revista correctamente mediante la API y retorna HTTP 201. |
-| `test_create_journal_endpoint_derives_knowledge_areas` | La creación por API deriva las áreas del conocimiento desde `academic_programs` e ignora cualquier intento de asignarlas manualmente. |
+| `test_create_journal_endpoint_derives_knowledge_areas` | La creación por API combina áreas manuales con las derivadas desde `academic_programs` y expone su procedencia. |
+| `test_publish_accepts_manual_effective_knowledge_area` | La publicación cuenta un área manual vigente como clasificación efectiva. |
+| `test_knowledge_area_catalog_filters_by_journal_origin` | Los filtros contextuales separan origen, editabilidad y opciones disponibles para una Journal. |
 | `test_create_journal_endpoint_allows_draft_platform` | La API permite crear una revista asociada a una plataforma en `BORRADOR` sin alterar su estado. |
 | `test_list_journals_returns_active_journals` | `GET /api/journals/` lista las revistas disponibles en el endpoint administrativo y excluye registros eliminados mediante Soft Delete. |
 | `test_publish_action_endpoint` | `POST /api/journals/{id}/publish/` activa y valida una revista, registrando el usuario y la fecha de validación. |
@@ -134,7 +139,8 @@ servicios, clasificación y API.
 Además de las validaciones previamente existentes, la suite actual verifica explícitamente las siguientes reglas:
 
 - El administrador selecciona únicamente `academic_programs` para clasificar una revista.
-- `knowledge_areas` es un dato derivado y de solo lectura.
+- `knowledge_areas` admite selección manual y devuelve `is_manual`,
+  `is_derived` y `editable` junto con las áreas derivadas.
 - Las áreas del conocimiento se calculan mediante `AcademicProgram -> SharedAcademicProgramKnowledgeArea -> KnowledgeArea`.
 - La derivación elimina duplicados cuando varios programas comparten una misma área.
 - Un `PATCH` sin `academic_programs` no modifica la clasificación existente.

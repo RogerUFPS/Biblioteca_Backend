@@ -102,9 +102,11 @@ deleted_at
 delete_explanation
 ```
 
-`academic_programs` y `knowledge_areas` **no se seleccionan manualmente**.
-Platform obtiene los programas de sus Journals elegibles y deriva las áreas
-mediante `SharedAcademicProgramKnowledgeArea`.
+La respuesta de Platform conserva procedencia manual/derivada por sección.
+Los programas y las áreas derivados provienen de Journals elegibles. En el
+caso de las áreas, Platform consume todas las áreas efectivas de Journal
+(`is_manual=true OR is_derived=true`) y las marca como derivadas en el nivel
+Platform; no copia los flags de procedencia de Journal.
 
 ### 4.2. `is_harvestable`, `base_api_url` y `api_key`
 
@@ -700,7 +702,8 @@ disponible y debe corregirse o verificarse nuevamente.
 
 Cada sección administrativa se representa con `id`, `name`, `is_manual`,
 `is_derived` y `editable`. Las cinco secciones compartidas con Journal se
-derivan de todas las Journals activas y validadas; una selección manual se
+derivan de todas las Journals activas y validadas. Para conocimiento se usa el
+conjunto efectivo manual/derivado de cada Journal; una selección manual se
 conserva cuando desaparece su última fuente derivada.
 
 Los catálogos de secciones admiten filtros contextuales:
