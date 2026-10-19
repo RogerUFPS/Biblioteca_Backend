@@ -4,6 +4,8 @@ from . import models, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, extend_schema_view
+from apps.journal import models as journal_models
 from apps.platforms import models as platform_models
 
 
@@ -16,6 +18,8 @@ IN_USE_MESSAGE = (
 class ProtectedCatalogViewSet(AuditableViewSet):
     platform_through = None
     platform_relation_field = None
+    journal_through = None
+    journal_relation_field = None
 
     def active_business_dependencies(self, instance):
         return []
@@ -30,21 +34,29 @@ class ProtectedCatalogViewSet(AuditableViewSet):
         queryset = super().filter_queryset(queryset)
         platform_id = self.request.query_params.get("platform")
         available_for = self.request.query_params.get("available_for_platform")
+        journal_id = self.request.query_params.get("journal")
+        available_for_journal = self.request.query_params.get(
+            "available_for_journal"
+        )
         origin = self.request.query_params.get("origin")
         editable = self.request.query_params.get("editable")
-        if (origin or editable is not None) and not platform_id:
-            raise ValidationError({"platform": "Este filtro es contextual a una plataforma."})
+        if platform_id and journal_id:
+            raise ValidationError({
+                "detail": "Use un solo contexto: platform o journal."
+            })
+        if (origin or editable is not None) and not (platform_id or journal_id):
+            raise ValidationError({
+                "detail": "Este filtro requiere platform o journal."
+            })
         if origin and origin not in {"manual", "derived", "both"}:
             raise ValidationError({"origin": "Use manual, derived o both."})
         through, field = self.platform_through, self.platform_relation_field
-        if through is None:
-            return queryset
-        if available_for:
+        if through is not None and available_for:
             used = through.objects.filter(platform_id=available_for).values_list(
                 f"{field}_id", flat=True
             )
             queryset = queryset.exclude(pk__in=used)
-        if platform_id:
+        if through is not None and platform_id:
             relations = through.objects.filter(platform_id=platform_id)
             if origin == "manual":
                 relations = relations.filter(is_manual=True, is_derived=False)
@@ -71,6 +83,38 @@ class ProtectedCatalogViewSet(AuditableViewSet):
                 queryset = queryset.filter(
                     pk__in=relations.values_list(f"{field}_id", flat=True)
                 )
+        journal_through = self.journal_through
+        journal_field = self.journal_relation_field
+        if journal_through is not None and available_for_journal:
+            used = journal_through.objects.filter(
+                journal_id=available_for_journal
+            ).values_list(f"{journal_field}_id", flat=True)
+            queryset = queryset.exclude(pk__in=used)
+        if journal_through is not None and journal_id:
+            relations = journal_through.objects.filter(journal_id=journal_id)
+            if origin == "manual":
+                relations = relations.filter(is_manual=True, is_derived=False)
+            elif origin == "derived":
+                relations = relations.filter(is_manual=False, is_derived=True)
+            elif origin == "both":
+                relations = relations.filter(is_manual=True, is_derived=True)
+            if editable is not None:
+                if editable.lower() not in {"true", "false"}:
+                    raise ValidationError({"editable": "Use true o false."})
+                editable_relations = journal_through.objects.filter(
+                    journal_id=journal_id,
+                    is_manual=True,
+                    is_derived=False,
+                )
+                if editable.lower() == "true":
+                    relations = editable_relations
+                else:
+                    relations = relations.exclude(
+                        pk__in=editable_relations.values_list("pk", flat=True)
+                    )
+            queryset = queryset.filter(
+                pk__in=relations.values_list(f"{journal_field}_id", flat=True)
+            )
         return queryset.distinct()
 
 
@@ -132,9 +176,31 @@ class EditorialViewSet(ProtectedCatalogViewSet):
         return [instance.journals.filter(deleted_at__isnull=True).exists()]
 
 
+@extend_schema_view(
+    list=extend_schema(parameters=[
+        OpenApiParameter(
+            "journal", OpenApiTypes.INT, OpenApiParameter.QUERY,
+            description="Journal usada como contexto de procedencia.",
+        ),
+        OpenApiParameter(
+            "origin", OpenApiTypes.STR, OpenApiParameter.QUERY,
+            description="Origen contextual: manual, derived o both.",
+        ),
+        OpenApiParameter(
+            "editable", OpenApiTypes.BOOL, OpenApiParameter.QUERY,
+            description="Filtra áreas editables o protegidas en la Journal.",
+        ),
+        OpenApiParameter(
+            "available_for_journal", OpenApiTypes.INT, OpenApiParameter.QUERY,
+            description="Excluye áreas con relación vigente en la Journal.",
+        ),
+    ]),
+)
 class KnowledgeAreaViewSet(ProtectedCatalogViewSet):
     platform_through = platform_models.SharedPlatformKnowledgeArea
     platform_relation_field = "knowledge_area"
+    journal_through = journal_models.SharedJournalKnowledgeArea
+    journal_relation_field = "knowledge_area"
     queryset = models.KnowledgeArea.objects.all()
     serializer_class = serializers.KnowledgeAreaSerializer
     search_fields = ["name"]
