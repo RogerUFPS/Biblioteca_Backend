@@ -2,6 +2,8 @@ from django.db import transaction
 from django.db.models import Prefetch
 from django.utils import timezone
 from drf_spectacular.utils import (
+    OpenApiParameter,
+    OpenApiTypes,
     extend_schema,
     extend_schema_view,
     inline_serializer,
@@ -17,7 +19,7 @@ from apps.core.viewsets import (
     get_acting_user,
 )
 
-from . import filters, models, serializers
+from . import filters, models, serializers, services
 from apps.platforms.classification import recalculate_platforms
 from apps.platforms import models as platform_models
 from apps.platforms import services as platform_services
@@ -29,6 +31,18 @@ class LicenseViewSet(AuditableViewSet):
     serializer_class = serializers.LicenseSerializer
     search_fields = ["name"]
     ordering_fields = ["name", "created_at", "updated_at"]
+
+    def destroy(self, request, *args, **kwargs):
+        license_instance = self.get_object()
+        if license_instance.journal_links.filter(journal__deleted_at__isnull=True).exists():
+            return Response(
+                {"detail": (
+                    "No se puede eliminar el registro porque está siendo utilizado "
+                    "por otros registros vigentes."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 def _with_platform_urls(queryset, *, published_only=False):
@@ -192,6 +206,14 @@ class JournalViewSet(AuditableViewSet):
             user=user,
             explanation=body.validated_data["delete_explanation"],
         )
+        journal.active = False
+        journal.validated_by = None
+        journal.validated_at = None
+        journal.updated_by = user
+        journal.updated_at = timezone.now()
+        journal.save(update_fields=[
+            "active", "validated_by", "validated_at", "updated_by", "updated_at",
+        ])
         recalculate_platforms(platform_ids, user=user)
         return Response(
             {"detail": "La revista fue eliminada lógicamente.", "permanent": False},
@@ -245,6 +267,8 @@ class JournalViewSet(AuditableViewSet):
                     created_by=user,
                 )
 
+        services.validate_journal_for_publication(journal)
+
         journal.active = True
         journal.validated_by = user
         journal.validated_at = now
@@ -266,6 +290,41 @@ class JournalViewSet(AuditableViewSet):
             self.get_serializer(journal).data,
             status=status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        summary="Listar asociaciones vigentes con plataformas",
+        parameters=[OpenApiParameter(
+            name="platform_is_public",
+            type=OpenApiTypes.BOOL,
+            location=OpenApiParameter.QUERY,
+            required=False,
+        )],
+        responses={200: drf_serializers.ListSerializer(
+            child=drf_serializers.DictField(),
+        )},
+        tags=["Revistas - Administración"],
+    )
+    @action(detail=True, methods=["get"], url_path="platforms")
+    def platform_associations(self, request, pk=None):
+        journal = self.get_object()
+        links = models.SharedJournalPlatform.objects.filter(
+            journal=journal,
+            platform__deleted_at__isnull=True,
+        ).select_related("platform")
+        raw_public = request.query_params.get("platform_is_public")
+        if raw_public is not None:
+            if raw_public.lower() not in {"true", "false"}:
+                return Response(
+                    {"platform_is_public": "Use true o false."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            is_public = raw_public.lower() == "true"
+            lookup = {"platform__status": platform_models.Platform.Status.PUBLICADO}
+            links = links.filter(**lookup) if is_public else links.exclude(**lookup)
+        return Response([
+            serializers._represent_journal_platform(link, include_relation_key=True)
+            for link in links.order_by("platform__name")
+        ])
 
     @extend_schema(
         summary="Desactivar revista",

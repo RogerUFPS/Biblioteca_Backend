@@ -118,6 +118,10 @@ def _represent_journal_platform(link, *, include_relation_key=False):
     }
     if include_relation_key:
         data["platform"] = link.platform_id
+        data["relation_id"] = link.pk
+        data["status"] = link.platform.status
+        data["is_public"] = link.platform.status == Platform.Status.PUBLICADO
+        data["is_current"] = not link.is_deleted and link.finish_period is None
     return data
 
 
@@ -396,11 +400,6 @@ class JournalSerializer(
                 None,
             )
         )
-
-        if base_instance is None and not attrs.get("platforms"):
-            raise serializers.ValidationError({
-                "platforms": "Una revista nueva requiere al menos una plataforma."
-            })
 
         return attrs
 

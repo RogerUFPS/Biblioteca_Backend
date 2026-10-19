@@ -57,6 +57,53 @@ JOURNAL_RELATION_CONFIG = (
 )
 
 
+def validate_journal_for_publication(journal: models.Journal) -> None:
+    """Valida el conjunto final de datos que hace publicable una Journal."""
+    errors = {}
+    if journal.is_deleted:
+        errors["detail"] = "No se puede publicar una revista eliminada."
+    for field in ("issn", "title"):
+        if not getattr(journal, field, None):
+            errors[field] = f"El campo {field} es obligatorio para publicar."
+    if not journal.editorial_id or journal.editorial.is_deleted:
+        errors["editorial"] = "La revista debe tener una editorial vigente."
+    if not journal.publication_date:
+        errors["publication_date"] = "La fecha de publicación es obligatoria."
+
+    relation_specs = (
+        ("languages", models.SharedJournalLanguage, "language"),
+        ("countries", models.SharedJournalCountry, "country"),
+        ("knowledge_areas", models.SharedJournalKnowledgeArea, "knowledge_area"),
+        ("material_types", models.SharedJournalMaterialType, "material_type"),
+        ("academic_programs", models.SharedJournalAcademicProgram, "academic_program"),
+    )
+    for field, through_model, relation_field in relation_specs:
+        if not through_model.objects.filter(
+            journal=journal,
+            **{f"{relation_field}__deleted_at__isnull": True},
+        ).exists():
+            errors[field] = "La revista debe tener al menos un valor vigente."
+
+    platform_links = models.SharedJournalPlatform.objects.filter(
+        journal=journal,
+        platform__deleted_at__isnull=True,
+    )
+    if not platform_links.exists():
+        errors["platforms"] = "La revista no tiene plataformas asociadas."
+    elif not platform_links.filter(platform__status=Platform.Status.PUBLICADO).exists():
+        errors["platforms"] = (
+            "La revista tiene plataformas asociadas, pero ninguna se encuentra publicada."
+        )
+
+    if not models.SharedJournalLicense.objects.filter(
+        journal=journal,
+        license__deleted_at__isnull=True,
+    ).exists():
+        errors["licenses"] = "La revista debe tener al menos una licencia vigente."
+    if errors:
+        raise ValidationError(errors)
+
+
 def validate_platform_for_journal_association(
     platform: Platform,
     *,
