@@ -89,6 +89,7 @@ class HarvestingViewsTestCase(APITestCase):
 
     @patch("apps.harvesting.views.services.run_scheduled_harvests", return_value=[])
     def test_run_due_executes_scheduled_harvests_without_token(self, run_scheduled):
+        self.client.force_authenticate(user=None)
         response = self.client.post(
             "/api/harvesting/schedules/run-due/",
         )
