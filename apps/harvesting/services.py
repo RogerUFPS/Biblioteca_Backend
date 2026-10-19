@@ -2,12 +2,15 @@ import logging
 import time
 import calendar
 import re
+import secrets
 import xml.etree.ElementTree as ElementTree
 from datetime import timedelta
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 import httpx
 
@@ -22,6 +25,10 @@ logger = logging.getLogger(__name__)
 OAI_NAMESPACE = "http://www.openarchives.org/OAI/2.0/"
 DC_NAMESPACE = "http://purl.org/dc/elements/1.1/"
 ISSN_PATTERN = re.compile(r"^\s*(\d{4})-?(\d{3}[\dXx])\s*$")
+
+
+class RetryableHarvestError(RuntimeError):
+    """A provider or network error that should be retried by the queue."""
 
 
 def get_latest_cursor_for_platform(platform: Platform) -> str:
@@ -866,6 +873,278 @@ def execute_harvest(harvest_id: int, **kwargs) -> models.Harvest:
     return harvester.harvest_records()
 
 
+def _worker_result(harvest: models.Harvest, *, stale: bool = False) -> dict[str, Any]:
+    return {
+        "harvest_id": harvest.pk,
+        "checkpoint": harvest.worker_checkpoint,
+        "state": harvest.state,
+        "has_more": (
+            harvest.state in {models.Harvest.State.PENDING, models.Harvest.State.RUNNING}
+            and not stale
+        ),
+        "stale": stale,
+    }
+
+
+def _finish_schedule_event(harvest: models.Harvest) -> None:
+    if not harvest.event_id:
+        return
+    event = models.ScheduleEvent.objects.select_for_update().get(pk=harvest.event_id)
+    harvest_states = list(event.harvests.values_list("state", flat=True))
+    terminal_states = {
+        models.Harvest.State.COMPLETED,
+        models.Harvest.State.FAILED,
+        models.Harvest.State.CANCELLED,
+    }
+    if not harvest_states or any(state not in terminal_states for state in harvest_states):
+        return
+    event.state = (
+        models.ScheduleEvent.State.FAILED
+        if models.Harvest.State.FAILED in harvest_states
+        else models.ScheduleEvent.State.COMPLETED
+    )
+    event.finished_at = timezone.now()
+    errors = list(
+        event.harvests.exclude(error_message__isnull=True)
+        .exclude(error_message="")
+        .values_list("error_message", flat=True)
+    )
+    event.error_message = "\n".join(errors) or None
+    event.save(update_fields=["state", "finished_at", "error_message"])
+
+
+def _worker_openalex_step(harvest: models.Harvest, user: User) -> None:
+    harvester = OpenAlexHarvester(harvest, user=user, batch_size=1)
+    client = harvester._get_client()
+    try:
+        base_url = (harvest.platform.base_api_url or harvester.DEFAULT_BASE_URL).rstrip("/")
+        response = client.get(
+            f"{base_url}/sources",
+            params={
+                "filter": "type:journal",
+                "cursor": harvest.api_cursor or "*",
+                "per-page": 1,
+            },
+        )
+        if response.status_code != 200:
+            error_type = (
+                RetryableHarvestError
+                if response.status_code == 429 or response.status_code >= 500
+                else RuntimeError
+            )
+            raise error_type(
+                f"OpenAlex API respondió con código {response.status_code}: "
+                f"{response.text[:200]}"
+            )
+        data = response.json()
+        results = data.get("results", [])
+        if not results:
+            harvest.state = models.Harvest.State.COMPLETED
+            return
+        harvester._process_single_source(results[0])
+        harvest.api_cursor = data.get("meta", {}).get("next_cursor") or ""
+        if not harvest.api_cursor:
+            harvest.state = models.Harvest.State.COMPLETED
+    finally:
+        client.close()
+
+
+def _worker_doaj_step(harvest: models.Harvest, user: User) -> None:
+    harvester = DoajHarvester(harvest, user=user)
+    endpoint = harvester._get_endpoint()
+    client = harvester._get_client()
+    try:
+        if not harvest.api_page:
+            total_processed = (
+                harvest.records_added
+                + harvest.records_updated
+                + harvest.records_failed
+            )
+            if harvest.max_quantity and total_processed >= harvest.max_quantity:
+                harvest.state = models.Harvest.State.COMPLETED
+                return
+            params = (
+                {"verb": "ListRecords", "metadataPrefix": "oai_dc"}
+                if not harvest.api_cursor
+                else {"verb": "ListRecords", "resumptionToken": harvest.api_cursor}
+            )
+            response = client.get(endpoint, params=params)
+            if response.status_code != 200:
+                error_type = (
+                    RetryableHarvestError
+                    if response.status_code == 429 or response.status_code >= 500
+                    else RuntimeError
+                )
+                raise error_type(
+                    f"DOAJ respondió con código {response.status_code}: "
+                    f"{response.text[:200]}"
+                )
+            harvest.api_page = response.text
+            harvest.api_marker = 0
+
+        records, next_token = harvester._records_and_token(harvest.api_page)
+        if harvest.api_marker > len(records):
+            raise RuntimeError(
+                "El marcador del Harvest supera el número de registros "
+                "de la respuesta DOAJ almacenada."
+            )
+        if harvest.api_marker < len(records):
+            harvester._process_record(records[harvest.api_marker])
+            harvest.api_marker += 1
+
+        if harvest.api_marker >= len(records):
+            harvest.api_cursor = next_token
+            harvest.api_marker = 0
+            harvest.api_page = ""
+            total_processed = (
+                harvest.records_added
+                + harvest.records_updated
+                + harvest.records_failed
+            )
+            if not next_token or (
+                harvest.max_quantity and total_processed >= harvest.max_quantity
+            ):
+                harvest.state = models.Harvest.State.COMPLETED
+    finally:
+        client.close()
+
+
+def process_harvest_worker_step(
+    harvest_id: int,
+    checkpoint: int,
+) -> dict[str, Any]:
+    """Process one provider record, committing the journal and checkpoint atomically."""
+    with transaction.atomic():
+        harvest = (
+            models.Harvest.objects.select_for_update()
+            .select_related("platform", "created_by", "event")
+            .get(pk=harvest_id)
+        )
+        if checkpoint != harvest.worker_checkpoint:
+            return _worker_result(harvest, stale=True)
+        if harvest.state in {
+            models.Harvest.State.COMPLETED,
+            models.Harvest.State.FAILED,
+            models.Harvest.State.CANCELLED,
+            models.Harvest.State.PAUSED,
+        }:
+            return _worker_result(harvest)
+        if harvest.state == models.Harvest.State.PAUSING:
+            harvest.state = models.Harvest.State.PAUSED
+            harvest.save(update_fields=["state"])
+            return _worker_result(harvest)
+
+        if not harvest.platform.is_harvestable:
+            harvest.state = models.Harvest.State.FAILED
+            harvest.error_message = (
+                f"La plataforma '{harvest.platform.name}' "
+                "no está habilitada para cosecha (is_harvestable=false)."
+            )
+            harvest.finished_at = timezone.now()
+            harvest.save(update_fields=["state", "error_message", "finished_at"])
+            _finish_schedule_event(harvest)
+            return _worker_result(harvest)
+
+        if harvest.state == models.Harvest.State.PENDING:
+            harvest.state = models.Harvest.State.RUNNING
+            harvest.started_at = harvest.started_at or timezone.now()
+
+        elapsed_milliseconds = max(
+            harvest.worker_elapsed_milliseconds,
+            harvest.elapsed_seconds * 1000,
+        )
+        if (
+            harvest.stop_after_minutes
+            and elapsed_milliseconds >= harvest.stop_after_minutes * 60_000
+        ):
+            harvest.state = models.Harvest.State.COMPLETED
+            harvest.finished_at = timezone.now()
+            harvest.save(update_fields=["state", "started_at", "finished_at"])
+            _finish_schedule_event(harvest)
+            return _worker_result(harvest)
+
+        total_processed = (
+            harvest.records_added
+            + harvest.records_updated
+            + harvest.records_failed
+        )
+        if (
+            harvest.max_quantity
+            and total_processed >= harvest.max_quantity
+            and not (_is_doaj_platform(harvest.platform) and harvest.api_page)
+        ):
+            harvest.state = models.Harvest.State.COMPLETED
+            harvest.finished_at = timezone.now()
+            harvest.save(update_fields=["state", "started_at", "finished_at"])
+            _finish_schedule_event(harvest)
+            return _worker_result(harvest)
+
+        started = time.monotonic()
+        try:
+            user = harvest.created_by or User.all_objects.get(code=0)
+            if _is_doaj_platform(harvest.platform):
+                _worker_doaj_step(harvest, user)
+            elif (
+                "openalex" in (harvest.platform.name or "").lower()
+                or "openalex.org" in (harvest.platform.base_api_url or "").lower()
+            ):
+                _worker_openalex_step(harvest, user)
+            else:
+                raise ValueError(
+                    "No existe un motor de recolección configurado para la plataforma "
+                    f"'{harvest.platform.name}'."
+                )
+        except (httpx.TransportError, RetryableHarvestError):
+            logger.warning(
+                "Error transitorio procesando Harvest #%s; se delega el reintento a Queue.",
+                harvest.pk,
+                exc_info=True,
+            )
+            raise
+        except Exception as exc:
+            logger.exception("Error durante el paso de Harvest #%s", harvest.pk)
+            harvest.state = models.Harvest.State.FAILED
+            harvest.error_message = str(exc)
+            harvest.finished_at = timezone.now()
+        finally:
+            step_milliseconds = max(1, int((time.monotonic() - started) * 1000))
+            harvest.worker_elapsed_milliseconds = elapsed_milliseconds + step_milliseconds
+            harvest.elapsed_seconds = harvest.worker_elapsed_milliseconds // 1000
+            harvest.worker_dispatched_at = timezone.now()
+            if harvest.state in {
+                models.Harvest.State.COMPLETED,
+                models.Harvest.State.FAILED,
+            }:
+                harvest.finished_at = harvest.finished_at or timezone.now()
+            else:
+                harvest.worker_checkpoint += 1
+            harvest.save(
+                update_fields=[
+                    "state",
+                    "started_at",
+                    "finished_at",
+                    "error_message",
+                    "api_cursor",
+                    "api_marker",
+                    "api_page",
+                    "records_added",
+                    "records_updated",
+                    "records_failed",
+                    "elapsed_seconds",
+                    "worker_elapsed_milliseconds",
+                    "worker_checkpoint",
+                    "worker_dispatched_at",
+                ]
+            )
+            if harvest.state in {
+                models.Harvest.State.COMPLETED,
+                models.Harvest.State.FAILED,
+            }:
+                _finish_schedule_event(harvest)
+
+        return _worker_result(harvest)
+
+
 def _next_occurrence(schedule: models.Schedule):
     occurrences = schedule.events.count()
     if occurrences == 0:
@@ -886,81 +1165,10 @@ def _next_occurrence(schedule: models.Schedule):
     return None
 
 
-def _run_schedule_event(event: models.ScheduleEvent) -> list[models.Harvest]:
-    event.state = models.ScheduleEvent.State.RUNNING
-    event.started_at = timezone.now()
-    event.save(update_fields=["state", "started_at"])
-
-    harvests = []
-    failures = []
-    for platform in event.schedule.platforms.all():
-        with transaction.atomic():
-            platform = Platform.objects.select_for_update().get(pk=platform.pk)
-            active_harvest = models.Harvest.objects.filter(
-                platform=platform,
-                state__in=[
-                    models.Harvest.State.PENDING,
-                    models.Harvest.State.RUNNING,
-                    models.Harvest.State.PAUSED,
-                ],
-            ).first()
-            harvest = models.Harvest.objects.create(
-                platform=platform,
-                schedule=event.schedule,
-                event=event,
-                **get_latest_harvest_progress(platform),
-                max_quantity=event.schedule.max_quantity,
-                stop_after_minutes=event.schedule.stop_after_minutes,
-                created_by=event.schedule.created_by,
-                state=(
-                    models.Harvest.State.FAILED
-                    if active_harvest
-                    else models.Harvest.State.PENDING
-                ),
-                finished_at=timezone.now() if active_harvest else None,
-                error_message=(
-                    f"La plataforma ya tiene una cosecha activa (#{active_harvest.pk})."
-                    if active_harvest
-                    else None
-                ),
-            )
-        harvests.append(harvest)
-        if active_harvest:
-            failures.append(harvest.error_message)
-            continue
-        try:
-            execute_harvest(harvest.pk)
-        except Exception as exc:
-            logger.exception(
-                "Error al ejecutar Harvest #%s del evento #%s",
-                harvest.pk,
-                event.pk,
-            )
-            harvest.refresh_from_db()
-            if harvest.state == models.Harvest.State.PENDING:
-                harvest.state = models.Harvest.State.FAILED
-                harvest.finished_at = timezone.now()
-                harvest.error_message = str(exc)
-                harvest.save(
-                    update_fields=["state", "finished_at", "error_message"],
-                )
-            failures.append(str(exc))
-
-    event.refresh_from_db()
-    event.finished_at = timezone.now()
-    if failures:
-        event.state = models.ScheduleEvent.State.FAILED
-        event.error_message = "\n".join(failures)
-    else:
-        event.state = models.ScheduleEvent.State.COMPLETED
-    event.save(update_fields=["state", "finished_at", "error_message"])
-    return harvests
-
-
 def run_scheduled_harvests(now=None) -> list[models.Harvest]:
-    """Crea y procesa los eventos vencidos de schedules activos."""
+    """Create due Harvests and dispatch bounded work to the Cloudflare producer."""
     now = now or timezone.now()
-    processed_harvests: list[models.Harvest] = []
+    retry_before = now - timedelta(minutes=5)
     schedule_ids = models.Schedule.objects.filter(
         deleted_at__isnull=True,
         start_date__lte=now,
@@ -979,12 +1187,103 @@ def run_scheduled_harvests(now=None) -> list[models.Harvest]:
                 scheduled_for=scheduled_for,
                 defaults={"created_by": schedule.created_by},
             )
-            if not created or event.state != models.ScheduleEvent.State.PENDING:
+            if not created:
                 continue
             event.state = models.ScheduleEvent.State.RUNNING
             event.started_at = now
             event.save(update_fields=["state", "started_at"])
+            for platform in schedule.platforms.all():
+                platform = Platform.objects.select_for_update().get(pk=platform.pk)
+                active_harvest = models.Harvest.objects.filter(
+                    platform=platform,
+                    state__in=[
+                        models.Harvest.State.PENDING,
+                        models.Harvest.State.RUNNING,
+                        models.Harvest.State.PAUSING,
+                        models.Harvest.State.PAUSED,
+                    ],
+                ).first()
+                harvest = models.Harvest.objects.create(
+                    platform=platform,
+                    schedule=schedule,
+                    event=event,
+                    **get_latest_harvest_progress(platform),
+                    max_quantity=schedule.max_quantity,
+                    stop_after_minutes=schedule.stop_after_minutes,
+                    created_by=schedule.created_by,
+                    state=(
+                        models.Harvest.State.FAILED
+                        if active_harvest or not platform.is_harvestable
+                        else models.Harvest.State.PENDING
+                    ),
+                    finished_at=(
+                        timezone.now()
+                        if active_harvest or not platform.is_harvestable
+                        else None
+                    ),
+                    error_message=(
+                        f"La plataforma ya tiene una cosecha activa (#{active_harvest.pk})."
+                        if active_harvest
+                        else (
+                            f"La plataforma '{platform.name}' no está habilitada "
+                            "para cosecha (is_harvestable=false)."
+                            if not platform.is_harvestable
+                            else None
+                        )
+                    ),
+                )
+            first_harvest = schedule.harvests.filter(event=event).first()
+            if first_harvest:
+                _finish_schedule_event(first_harvest)
+            else:
+                event.state = models.ScheduleEvent.State.FAILED
+                event.finished_at = timezone.now()
+                event.error_message = "La programación no tiene plataformas asociadas."
+                event.save(update_fields=["state", "finished_at", "error_message"])
 
-        processed_harvests.extend(_run_schedule_event(event))
+    candidates = list(models.Harvest.objects.filter(
+        state__in=[
+            models.Harvest.State.PENDING,
+            models.Harvest.State.RUNNING,
+            models.Harvest.State.PAUSING,
+        ],
+        event__isnull=False,
+    ).filter(
+        Q(worker_dispatched_at__isnull=True)
+        | Q(worker_dispatched_at__lt=retry_before)
+    ).order_by("created_at"))
+    dispatched = []
+    for harvest in candidates:
+        dispatch_harvest_to_worker(harvest)
+        dispatched.append(harvest)
+    return dispatched
 
-    return processed_harvests
+
+def dispatch_harvest_to_worker(harvest: models.Harvest) -> models.Harvest:
+    producer_url = getattr(settings, "HARVESTING_WORKER_PRODUCER_URL", "")
+    worker_token = getattr(settings, "HARVESTING_WORKER_TOKEN", "")
+    if not producer_url or not worker_token:
+        raise RuntimeError(
+            "Configura HARVESTING_WORKER_PRODUCER_URL y HARVESTING_WORKER_TOKEN "
+            "para despachar las cosechas."
+        )
+    parsed_producer_url = urlsplit(producer_url)
+    if parsed_producer_url.scheme != "https" or not parsed_producer_url.netloc:
+        raise RuntimeError("HARVESTING_WORKER_PRODUCER_URL debe ser una URL HTTPS válida.")
+    response = httpx.post(
+        producer_url,
+        json={
+            "harvest_id": harvest.pk,
+            "checkpoint": harvest.worker_checkpoint,
+        },
+        headers={"Authorization": f"Bearer {worker_token}"},
+        timeout=10.0,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise RuntimeError(
+            f"El productor de Cloudflare rechazó Harvest #{harvest.pk} "
+            f"(HTTP {response.status_code})."
+        )
+    harvest.worker_dispatched_at = timezone.now()
+    harvest.save(update_fields=["worker_dispatched_at"])
+    return harvest

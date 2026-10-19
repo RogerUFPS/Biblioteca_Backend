@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 from unittest.mock import patch
@@ -95,6 +96,36 @@ class HarvestingViewsTestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, [])
         run_scheduled.assert_called_once_with()
+
+    @override_settings(HARVESTING_WORKER_TOKEN="worker-secret")
+    @patch(
+        "apps.harvesting.views.services.process_harvest_worker_step",
+        return_value={
+            "harvest_id": 17,
+            "checkpoint": 1,
+            "state": Harvest.State.RUNNING,
+            "has_more": True,
+            "stale": False,
+        },
+    )
+    def test_worker_step_requires_shared_secret(self, process_step):
+        response = self.client.post(
+            "/api/harvesting/worker/step/",
+            {"harvest_id": 17, "checkpoint": 0},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        process_step.assert_not_called()
+
+        response = self.client.post(
+            "/api/harvesting/worker/step/",
+            {"harvest_id": 17, "checkpoint": 0},
+            format="json",
+            HTTP_AUTHORIZATION="Bearer worker-secret",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["checkpoint"], 1)
+        process_step.assert_called_once_with(harvest_id=17, checkpoint=0)
 
     def test_harvest_and_event_endpoints_are_read_only(self):
         schedule = Schedule.objects.create(
@@ -203,7 +234,7 @@ class HarvestingViewsTestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_pending_harvest_can_be_paused_and_resumed(self):
+    def test_pending_harvest_can_be_paused_and_queued_to_resume(self):
         harvest = Harvest.objects.create(
             platform=self.platform,
             max_quantity=100,
@@ -218,26 +249,19 @@ class HarvestingViewsTestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["state"], Harvest.State.PAUSED)
 
-        def complete_harvest(harvest_id, **kwargs):
-            Harvest.objects.filter(pk=harvest_id).update(
-                state=Harvest.State.COMPLETED,
-                finished_at=timezone.now(),
-            )
-            return Harvest.objects.get(pk=harvest_id)
-
         with patch(
-            "apps.harvesting.views.services.execute_harvest",
-            side_effect=complete_harvest,
-        ) as execute_harvest:
+            "apps.harvesting.views.services.dispatch_harvest_to_worker",
+            side_effect=lambda item: item,
+        ) as dispatch_harvest:
             response = self.client.post(
                 f"/api/harvesting/harvests/{harvest.pk}/resume/",
                 {},
                 format="json",
             )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["state"], Harvest.State.COMPLETED)
-        self.assertEqual(execute_harvest.call_args.kwargs["user"], self.user)
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data["state"], Harvest.State.PENDING)
+        self.assertEqual(dispatch_harvest.call_args.args[0].pk, harvest.pk)
 
     def test_running_harvest_pause_returns_accepted_while_page_finishes(self):
         harvest = Harvest.objects.create(

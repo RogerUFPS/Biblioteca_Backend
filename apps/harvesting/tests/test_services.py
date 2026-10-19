@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 import httpx
 
@@ -13,6 +13,7 @@ from apps.harvesting.services import (
     _next_occurrence,
     get_harvester_for_platform,
     get_latest_harvest_progress,
+    process_harvest_worker_step,
     run_scheduled_harvests,
 )
 from apps.journal.models import (
@@ -204,6 +205,62 @@ class HarvestingServicesTestCase(TestCase):
         self.assertEqual(resumed.api_page, "")
         resumed_client.get.assert_not_called()
         self.assertTrue(Journal.objects.filter(issn="2532-1994").exists())
+
+    @patch("apps.harvesting.services.DoajHarvester._get_client")
+    def test_worker_step_is_checkpointed_and_duplicate_messages_are_ignored(
+        self,
+        get_client,
+    ):
+        client = MagicMock(spec=httpx.Client)
+        client.get.return_value = self._doaj_response(
+            self._doaj_record() + self._doaj_record("2532-1994", "Novecento"),
+            token="next-page-token",
+        )
+        get_client.return_value = client
+        harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            max_quantity=2,
+            created_by=self.user,
+        )
+
+        first = process_harvest_worker_step(harvest.pk, checkpoint=0)
+        duplicate = process_harvest_worker_step(harvest.pk, checkpoint=0)
+        second = process_harvest_worker_step(harvest.pk, checkpoint=1)
+
+        harvest.refresh_from_db()
+        self.assertEqual(first["checkpoint"], 1)
+        self.assertTrue(first["has_more"])
+        self.assertTrue(duplicate["stale"])
+        self.assertFalse(duplicate["has_more"])
+        self.assertEqual(second["state"], Harvest.State.COMPLETED)
+        self.assertEqual(harvest.api_cursor, "next-page-token")
+        self.assertEqual(harvest.records_added, 2)
+        self.assertEqual(harvest.worker_checkpoint, 1)
+        self.assertEqual(Journal.objects.count(), 2)
+
+    @patch("apps.harvesting.services.DoajHarvester._get_client")
+    def test_worker_retries_provider_timeout_without_advancing_checkpoint(
+        self,
+        get_client,
+    ):
+        client = MagicMock(spec=httpx.Client)
+        client.get.side_effect = httpx.TimeoutException("provider timed out")
+        get_client.return_value = client
+        harvest = Harvest.objects.create(
+            platform=self.doaj_platform,
+            stop_after_minutes=10,
+            created_by=self.user,
+        )
+
+        with self.assertRaises(httpx.TimeoutException):
+            process_harvest_worker_step(harvest.pk, checkpoint=0)
+
+        harvest.refresh_from_db()
+        self.assertEqual(harvest.state, Harvest.State.PENDING)
+        self.assertEqual(harvest.worker_checkpoint, 0)
+        self.assertEqual(harvest.api_marker, 0)
+        self.assertEqual(harvest.api_page, "")
+        client.close.assert_called_once()
 
     def test_doaj_finishes_page_before_quantity_limit_and_uses_resumption_token(self):
         first_client = MagicMock(spec=httpx.Client)
@@ -535,15 +592,15 @@ class HarvestingServicesTestCase(TestCase):
         self.assertIsNotNone(harvest.started_at)
         self.assertIsNotNone(harvest.finished_at)
 
-    @patch("apps.harvesting.services.execute_harvest")
-    def test_scheduled_event_creates_one_harvest_per_platform(self, execute_harvest):
-        def complete_harvest(harvest_id):
-            Harvest.objects.filter(pk=harvest_id).update(
-                state=Harvest.State.COMPLETED,
-                finished_at=timezone.now(),
-            )
-
-        execute_harvest.side_effect = complete_harvest
+    @override_settings(
+        HARVESTING_WORKER_PRODUCER_URL="https://producer.test",
+        HARVESTING_WORKER_TOKEN="test-token",
+    )
+    @patch("apps.harvesting.services.dispatch_harvest_to_worker")
+    def test_scheduled_event_creates_and_dispatches_one_harvest_per_platform(
+        self,
+        dispatch_harvest,
+    ):
         second_platform = Platform.objects.create(
             name="Second Harvest Platform",
             status=Platform.Status.PUBLICADO,
@@ -563,15 +620,29 @@ class HarvestingServicesTestCase(TestCase):
         first_harvests = run_scheduled_harvests(now=now)
         self.assertEqual(len(first_harvests), 2)
         event = ScheduleEvent.objects.get(schedule=schedule)
-        self.assertEqual(event.state, ScheduleEvent.State.COMPLETED)
+        self.assertEqual(event.state, ScheduleEvent.State.RUNNING)
         self.assertEqual(event.harvests.count(), 2)
-        self.assertEqual(execute_harvest.call_count, 2)
+        self.assertEqual(dispatch_harvest.call_count, 2)
+        self.assertTrue(
+            all(harvest.state == Harvest.State.PENDING for harvest in first_harvests)
+        )
+
+        Harvest.objects.filter(event=event).update(state=Harvest.State.COMPLETED)
+        event.state = ScheduleEvent.State.COMPLETED
+        event.finished_at = timezone.now()
+        event.save(update_fields=["state", "finished_at"])
 
         next_harvests = run_scheduled_harvests(now=now + timedelta(days=1))
         self.assertEqual(len(next_harvests), 2)
         self.assertEqual(schedule.events.count(), 2)
+        self.assertEqual(dispatch_harvest.call_count, 4)
 
-    def test_scheduled_harvest_fails_if_platform_was_disabled(self):
+    @override_settings(
+        HARVESTING_WORKER_PRODUCER_URL="https://producer.test",
+        HARVESTING_WORKER_TOKEN="test-token",
+    )
+    @patch("apps.harvesting.services.dispatch_harvest_to_worker")
+    def test_scheduled_harvest_fails_if_platform_was_disabled(self, dispatch_harvest):
         self.platform.is_harvestable = False
         self.platform.save(update_fields=["is_harvestable"])
         now = timezone.now()
@@ -585,10 +656,42 @@ class HarvestingServicesTestCase(TestCase):
 
         harvests = run_scheduled_harvests(now=now)
 
-        self.assertEqual(len(harvests), 1)
-        self.assertEqual(harvests[0].state, Harvest.State.FAILED)
-        self.assertIn("no está habilitada para cosecha", harvests[0].error_message)
+        self.assertEqual(harvests, [])
+        failed_harvest = Harvest.objects.get(event__schedule=schedule)
+        self.assertEqual(failed_harvest.state, Harvest.State.FAILED)
+        self.assertIn("no está habilitada para cosecha", failed_harvest.error_message)
+        dispatch_harvest.assert_not_called()
         self.assertEqual(schedule.events.get().state, ScheduleEvent.State.FAILED)
+
+    @override_settings(
+        HARVESTING_WORKER_PRODUCER_URL="https://producer.test",
+        HARVESTING_WORKER_TOKEN="test-token",
+    )
+    @patch("apps.harvesting.services.dispatch_harvest_to_worker")
+    def test_repeated_scheduler_call_does_not_create_duplicate_event_or_harvest(
+        self,
+        dispatch_harvest,
+    ):
+        now = timezone.now()
+        schedule = Schedule.objects.create(
+            frequency=Schedule.Frequency.ONCE,
+            max_quantity=10,
+            start_date=now - timedelta(minutes=1),
+            created_by=self.user,
+        )
+        schedule.platforms.add(self.platform)
+
+        first = run_scheduled_harvests(now=now)
+        Harvest.objects.filter(pk=first[0].pk).update(
+            worker_dispatched_at=now,
+        )
+        second = run_scheduled_harvests(now=now + timedelta(seconds=30))
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [])
+        self.assertEqual(schedule.events.count(), 1)
+        self.assertEqual(Harvest.objects.filter(schedule=schedule).count(), 1)
+        dispatch_harvest.assert_called_once()
 
     def test_non_harvestable_platform_has_no_harvester(self):
         self.platform.is_harvestable = False
