@@ -213,6 +213,7 @@ class JournalModelsTests(TestCase):
         SharedJournalKnowledgeArea.objects.create(
             journal=journal,
             knowledge_area=self.knowledge_area,
+            is_manual=True,
             created_by=self.system,
         )
 
@@ -221,6 +222,24 @@ class JournalModelsTests(TestCase):
                 SharedJournalKnowledgeArea.objects.create(
                     journal=journal,
                     knowledge_area=self.knowledge_area,
+                    is_manual=True,
+                    created_by=self.system,
+                )
+
+    def test_active_knowledge_area_relation_requires_an_origin(self):
+        journal = Journal.objects.create(
+            issn="5656-7878",
+            title="Journal Area Origin",
+            created_by=self.system,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SharedJournalKnowledgeArea.objects.create(
+                    journal=journal,
+                    knowledge_area=self.knowledge_area,
+                    is_manual=False,
+                    is_derived=False,
                     created_by=self.system,
                 )
 

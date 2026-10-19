@@ -157,10 +157,13 @@ class JournalAPITests(APITestCase):
             (models.SharedJournalLicense, "license", self.license),
         )
         for through, field, value in specs:
+            defaults = {"created_by": self.system}
+            if through is models.SharedJournalKnowledgeArea:
+                defaults["is_derived"] = True
             through.objects.get_or_create(
                 journal=journal,
                 **{field: value},
-                defaults={"created_by": self.system},
+                defaults=defaults,
             )
 
     # ==========================================================================
@@ -261,13 +264,17 @@ class JournalAPITests(APITestCase):
         self.assertIsNone(journal.validated_at)
 
     def test_create_journal_endpoint_derives_knowledge_areas(self):
+        manual_area = KnowledgeArea.objects.create(
+            name="Ecología aplicada",
+            created_by=self.system,
+        )
         response = self.client.post(
             "/api/journals/",
             {
                 "issn": "1476-4688",
                 "title": "Nature Derived",
                 "academic_programs": [self.academic_program.pk],
-                "knowledge_areas": [999999],
+                "knowledge_areas": [manual_area.pk],
                 "platforms": [{
                     "platform": self.platform.pk,
                     "journal_url": "https://8.8.8.8/nature-derived",
@@ -280,9 +287,14 @@ class JournalAPITests(APITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(
-            data["knowledge_areas"],
-            [self.knowledge_area.pk],
+            {item["id"] for item in data["knowledge_areas"]},
+            {self.knowledge_area.pk, manual_area.pk},
         )
+        by_id = {item["id"]: item for item in data["knowledge_areas"]}
+        self.assertTrue(by_id[self.knowledge_area.pk]["is_derived"])
+        self.assertFalse(by_id[self.knowledge_area.pk]["editable"])
+        self.assertTrue(by_id[manual_area.pk]["is_manual"])
+        self.assertTrue(by_id[manual_area.pk]["editable"])
 
     def test_create_journal_endpoint_allows_draft_platform(self):
         draft_platform = Platform.objects.create(
@@ -427,6 +439,30 @@ class JournalAPITests(APITestCase):
             journal.pk,
         )
 
+    def test_publish_accepts_manual_effective_knowledge_area(self):
+        journal = self._create_journal(
+            issn="4545-4545",
+            title="Journal Manual Area Publish",
+            active=False,
+            validated=False,
+        )
+        self._complete_for_publication(journal)
+        area_link = models.SharedJournalKnowledgeArea.objects.get(
+            journal=journal,
+            knowledge_area=self.knowledge_area,
+        )
+        area_link.is_manual = True
+        area_link.is_derived = False
+        area_link.save(update_fields=["is_manual", "is_derived"])
+
+        response = self.client.post(
+            f"/api/journals/{journal.pk}/publish/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_deactivate_action_endpoint(self):
         """
         POST /api/journals/{id}/deactivate/
@@ -534,6 +570,7 @@ class JournalAPITests(APITestCase):
         models.SharedJournalKnowledgeArea.objects.create(
             journal=journal,
             knowledge_area=self.knowledge_area,
+            is_manual=True,
             created_by=self.system,
         )
 
@@ -805,6 +842,7 @@ class JournalAPITests(APITestCase):
         models.SharedJournalKnowledgeArea.objects.create(
             journal=journal,
             knowledge_area=self.knowledge_area,
+            is_derived=True,
             created_by=self.system,
         )
 
@@ -1043,3 +1081,72 @@ class JournalAPITests(APITestCase):
             data["total_items"],
             0,
         )
+
+    def test_knowledge_area_catalog_filters_by_journal_origin(self):
+        journal = self._create_journal(issn="6060-6060", active=False)
+        manual = KnowledgeArea.objects.create(
+            name="Área manual filtro", created_by=self.system
+        )
+        derived = KnowledgeArea.objects.create(
+            name="Área derivada filtro", created_by=self.system
+        )
+        both = KnowledgeArea.objects.create(
+            name="Área mixta filtro", created_by=self.system
+        )
+        available = KnowledgeArea.objects.create(
+            name="Área disponible filtro", created_by=self.system
+        )
+        for area, is_manual, is_derived in (
+            (manual, True, False),
+            (derived, False, True),
+            (both, True, True),
+        ):
+            models.SharedJournalKnowledgeArea.objects.create(
+                journal=journal,
+                knowledge_area=area,
+                is_manual=is_manual,
+                is_derived=is_derived,
+                created_by=self.system,
+            )
+
+        cases = {
+            "manual": manual.pk,
+            "derived": derived.pk,
+            "both": both.pk,
+        }
+        for origin, expected_id in cases.items():
+            response = self.client.get(
+                "/api/catalog/knowledge-areas/",
+                {"journal": journal.pk, "origin": origin},
+            )
+            data = self._get_data(response)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                {item["id"] for item in data["results"]}, {expected_id}
+            )
+
+        editable_response = self.client.get(
+            "/api/catalog/knowledge-areas/",
+            {"journal": journal.pk, "editable": "true"},
+        )
+        self.assertEqual(
+            {item["id"] for item in self._get_data(editable_response)["results"]},
+            {manual.pk},
+        )
+
+        available_response = self.client.get(
+            "/api/catalog/knowledge-areas/",
+            {
+                "available_for_journal": journal.pk,
+                "page_size": 100,
+            },
+        )
+        self.assertEqual(available_response.status_code, 200)
+        available_ids = {
+            item["id"]
+            for item in self._get_data(available_response)["results"]
+        }
+        self.assertIn(available.pk, available_ids)
+        self.assertNotIn(manual.pk, available_ids)
+        self.assertNotIn(derived.pk, available_ids)
+        self.assertNotIn(both.pk, available_ids)
