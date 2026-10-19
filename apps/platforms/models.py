@@ -239,7 +239,37 @@ class LinkCheckLog(AuditableModel):
 # TABLAS INTERMEDIAS DE CLASIFICACIÓN (SharedPlatform*)
 # ==============================================================================
 
-class SharedPlatformSupport(AuditableModel):
+class PlatformSectionOriginModel(AuditableModel):
+    """Procedencia de un valor de sección dentro de una Platform."""
+
+    is_manual = models.BooleanField(default=False)
+    is_derived = models.BooleanField(default=False)
+
+    class Meta:
+        abstract = True
+
+    def clean(self):
+        super().clean()
+        if not self.is_deleted and not (self.is_manual or self.is_derived):
+            raise ValidationError(
+                "Una relación de sección vigente debe tener una procedencia."
+            )
+
+    def save(self, *args, **kwargs):
+        # Una relación creada directamente representa una selección manual;
+        # los flujos derivados envían is_derived=True de forma explícita.
+        if self._state.adding and not (self.is_manual or self.is_derived):
+            self.is_manual = True
+        return super().save(*args, **kwargs)
+
+    def soft_delete(self, user=None, explanation=None):
+        self.is_manual = False
+        self.is_derived = False
+        super().soft_delete(user=user, explanation=explanation)
+        self.save(update_fields=["is_manual", "is_derived"])
+
+
+class SharedPlatformSupport(PlatformSectionOriginModel):
     platform = models.ForeignKey(
         Platform,
         on_delete=models.PROTECT,
@@ -264,7 +294,7 @@ class SharedPlatformSupport(AuditableModel):
         return f"{self.platform} <-> {self.institution}"
 
 
-class SharedPlatformLanguage(AuditableModel):
+class SharedPlatformLanguage(PlatformSectionOriginModel):
     platform = models.ForeignKey(
         Platform,
         on_delete=models.PROTECT,
@@ -289,7 +319,7 @@ class SharedPlatformLanguage(AuditableModel):
         return f"{self.platform} <-> {self.language}"
 
 
-class SharedPlatformCountry(AuditableModel):
+class SharedPlatformCountry(PlatformSectionOriginModel):
     platform = models.ForeignKey(
         Platform,
         on_delete=models.PROTECT,
@@ -314,7 +344,7 @@ class SharedPlatformCountry(AuditableModel):
         return f"{self.platform} <-> {self.country}"
 
 
-class SharedPlatformKnowledgeArea(AuditableModel):
+class SharedPlatformKnowledgeArea(PlatformSectionOriginModel):
     platform = models.ForeignKey(
         Platform,
         on_delete=models.PROTECT,
@@ -339,7 +369,7 @@ class SharedPlatformKnowledgeArea(AuditableModel):
         return f"{self.platform} <-> {self.knowledge_area}"
 
 
-class SharedPlatformMaterialType(AuditableModel):
+class SharedPlatformMaterialType(PlatformSectionOriginModel):
     platform = models.ForeignKey(
         Platform,
         on_delete=models.PROTECT,
@@ -364,7 +394,7 @@ class SharedPlatformMaterialType(AuditableModel):
         return f"{self.platform} <-> {self.material_type}"
 
 
-class SharedPlatformAcademicProgram(AuditableModel):
+class SharedPlatformAcademicProgram(PlatformSectionOriginModel):
     platform = models.ForeignKey(
         Platform,
         on_delete=models.PROTECT,

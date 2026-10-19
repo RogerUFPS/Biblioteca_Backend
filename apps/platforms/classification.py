@@ -1,123 +1,178 @@
-"""Clasificación derivada perteneciente al dominio Platform."""
+"""Procedencia manual y clasificación derivada del dominio Platform."""
 
 from collections import defaultdict
 from collections.abc import Iterable
 
 from django.db import transaction
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
-from apps.catalog.models import SharedAcademicProgramKnowledgeArea
-from apps.core.relations import sync_auditable_relation_ids
 from apps.journal import models as journal_models
 
 from . import models
 
 
-PROGRAM_DELETE = "Programa derivado retirado al recalcular la plataforma."
-AREA_DELETE = "Área derivada retirada al recalcular la plataforma."
+DERIVED_DELETE = "Relación derivada retirada al recalcular la plataforma."
+MANUAL_DELETE = "Relación manual retirada durante la actualización de la plataforma."
 
 
-def _area_ids_by_program(program_ids: set[int]) -> dict[int, set[int]]:
-    result: dict[int, set[int]] = defaultdict(set)
-    rows = SharedAcademicProgramKnowledgeArea.objects.filter(
-        academic_program_id__in=program_ids,
-        academic_program__deleted_at__isnull=True,
-        knowledge_area__deleted_at__isnull=True,
-    ).values_list("academic_program_id", "knowledge_area_id")
-    for program_id, area_id in rows:
-        result[program_id].add(area_id)
-    return result
+SECTION_SPECS = (
+    ("languages", models.SharedPlatformLanguage, "language", journal_models.SharedJournalLanguage),
+    ("countries", models.SharedPlatformCountry, "country", journal_models.SharedJournalCountry),
+    (
+        "knowledge_areas",
+        models.SharedPlatformKnowledgeArea,
+        "knowledge_area",
+        journal_models.SharedJournalKnowledgeArea,
+    ),
+    (
+        "material_types",
+        models.SharedPlatformMaterialType,
+        "material_type",
+        journal_models.SharedJournalMaterialType,
+    ),
+    (
+        "academic_programs",
+        models.SharedPlatformAcademicProgram,
+        "academic_program",
+        journal_models.SharedJournalAcademicProgram,
+    ),
+)
+
+MANUAL_SECTION_SPECS = (
+    ("institutions", models.SharedPlatformSupport, "institution"),
+    *((name, model, field) for name, model, field, _ in SECTION_SPECS),
+)
+
+
+def _set_origin(link, *, user, is_manual=None, is_derived=None):
+    changed = False
+    if is_manual is not None and link.is_manual != is_manual:
+        link.is_manual = is_manual
+        changed = True
+    if is_derived is not None and link.is_derived != is_derived:
+        link.is_derived = is_derived
+        changed = True
+    if changed:
+        link.updated_by = user
+        link.updated_at = timezone.now()
+        link.save(update_fields=["is_manual", "is_derived", "updated_by", "updated_at"])
+    return changed
+
+
+def _sync_origin(*, platform, desired_ids, through_model, relation_field, origin, user):
+    desired_ids = set(desired_ids)
+    links = {
+        getattr(link, f"{relation_field}_id"): link
+        for link in through_model.all_objects.select_for_update().filter(platform=platform)
+    }
+    changed = False
+    for related_id, link in links.items():
+        wanted = related_id in desired_ids
+        if origin == "is_manual" and not link.is_deleted and link.is_derived:
+            # Mientras exista una fuente derivada la relación está protegida:
+            # tampoco se altera una contribución manual previa.
+            continue
+        if wanted:
+            if link.is_deleted:
+                link.restore()
+                changed = True
+            changed |= _set_origin(link, user=user, **{origin: True})
+        else:
+            changed |= _set_origin(link, user=user, **{origin: False})
+            if not link.is_deleted and not (link.is_manual or link.is_derived):
+                link.soft_delete(user=user, explanation=(
+                    MANUAL_DELETE if origin == "is_manual" else DERIVED_DELETE
+                ))
+                changed = True
+    for related_id in desired_ids - links.keys():
+        through_model.objects.create(
+            platform=platform,
+            **{f"{relation_field}_id": related_id, origin: True},
+            created_by=user,
+        )
+        changed = True
+    return changed
+
+
+@transaction.atomic
+def sync_manual_platform_sections(platform, relation_data, *, user):
+    """Sincroniza solo la contribución manual, conservando la derivada."""
+    changed = False
+    for data_field, through_model, relation_field in MANUAL_SECTION_SPECS:
+        if data_field not in relation_data:
+            continue
+        changed |= _sync_origin(
+            platform=platform,
+            desired_ids=(item.pk for item in relation_data[data_field]),
+            through_model=through_model,
+            relation_field=relation_field,
+            origin="is_manual",
+            user=user,
+        )
+    return changed
 
 
 @transaction.atomic
 def recalculate_platforms(platform_ids: Iterable[int], *, user) -> set[int]:
-    """Materializa programas y áreas desde las Journals elegibles."""
+    """Recalcula las cinco secciones compartidas desde todas las Journals elegibles."""
     ids = set(platform_ids)
     if not ids:
         return set()
 
-    programs_by_platform: dict[int, set[int]] = defaultdict(set)
-    eligible_journals: dict[int, set[int]] = defaultdict(set)
-    rows = journal_models.SharedJournalPlatform.objects.filter(
-        platform_id__in=ids,
-        journal__deleted_at__isnull=True,
-        journal__active=True,
-        journal__validated_at__isnull=False,
-        journal__academic_program_links__deleted_at__isnull=True,
-        journal__academic_program_links__academic_program_id__isnull=False,
-        journal__academic_program_links__academic_program__deleted_at__isnull=True,
-    ).values_list(
-        "platform_id", "journal_id",
-        "journal__academic_program_links__academic_program_id",
-    )
-    for platform_id, journal_id, program_id in rows:
-        eligible_journals[platform_id].add(journal_id)
-        if program_id is not None:
-            programs_by_platform[platform_id].add(program_id)
-
-    eligible_rows = journal_models.SharedJournalPlatform.objects.filter(
+    eligible = journal_models.SharedJournalPlatform.objects.filter(
         platform_id__in=ids,
         journal__deleted_at__isnull=True,
         journal__active=True,
         journal__validated_at__isnull=False,
     ).values_list("platform_id", "journal_id")
-    for platform_id, journal_id in eligible_rows:
-        eligible_journals[platform_id].add(journal_id)
+    journal_ids_by_platform = defaultdict(set)
+    for platform_id, journal_id in eligible:
+        journal_ids_by_platform[platform_id].add(journal_id)
 
-    all_program_ids = (
-        set().union(*programs_by_platform.values()) if programs_by_platform else set()
-    )
-    areas_by_program = _area_ids_by_program(all_program_ids)
-    program_links: dict[int, list] = defaultdict(list)
-    for link in models.SharedPlatformAcademicProgram.all_objects.filter(
-        platform_id__in=ids
-    ):
-        program_links[link.platform_id].append(link)
-    area_links: dict[int, list] = defaultdict(list)
-    for link in models.SharedPlatformKnowledgeArea.all_objects.filter(
-        platform_id__in=ids
-    ):
-        area_links[link.platform_id].append(link)
+    desired_by_section = {}
+    all_eligible_journal_ids = set().union(*journal_ids_by_platform.values()) if journal_ids_by_platform else set()
+    for data_field, _, relation_field, journal_through in SECTION_SPECS:
+        by_platform = defaultdict(set)
+        if all_eligible_journal_ids:
+            rows = journal_through.objects.filter(
+                journal_id__in=all_eligible_journal_ids,
+                **{f"{relation_field}__deleted_at__isnull": True},
+            ).values_list("journal_id", f"{relation_field}_id")
+            values_by_journal = defaultdict(set)
+            for journal_id, related_id in rows:
+                values_by_journal[journal_id].add(related_id)
+            for platform_id, journal_ids in journal_ids_by_platform.items():
+                for journal_id in journal_ids:
+                    by_platform[platform_id].update(values_by_journal[journal_id])
+        desired_by_section[data_field] = by_platform
 
-    changed_platform_ids: set[int] = set()
-    platforms = models.Platform.all_objects.select_for_update().filter(pk__in=ids)
-    for platform in platforms:
-        desired_programs = programs_by_platform.get(platform.pk, set())
-        desired_areas = (
-            set().union(*(
-                areas_by_program.get(program_id, set())
-                for program_id in desired_programs
-            )) if desired_programs else set()
-        )
-        programs_changed = sync_auditable_relation_ids(
-            through_model=models.SharedPlatformAcademicProgram,
-            parent_field="platform", parent_id=platform.pk,
-            related_field="academic_program", desired_ids=desired_programs,
-            user=user, delete_explanation=PROGRAM_DELETE,
-            existing_links=program_links.get(platform.pk, []),
-        )
-        areas_changed = sync_auditable_relation_ids(
-            through_model=models.SharedPlatformKnowledgeArea,
-            parent_field="platform", parent_id=platform.pk,
-            related_field="knowledge_area", desired_ids=desired_areas,
-            user=user, delete_explanation=AREA_DELETE,
-            existing_links=area_links.get(platform.pk, []),
-        )
-        if programs_changed or areas_changed:
-            changed_platform_ids.add(platform.pk)
-        if (
-            eligible_journals.get(platform.pk)
-            and (not desired_programs or not desired_areas)
-            and platform.status == models.Platform.Status.PUBLICADO
-        ):
-            now = timezone.now()
-            platform.status = models.Platform.Status.BORRADOR
-            platform.validated_by = None
-            platform.validated_at = None
-            platform.updated_by = user
-            platform.updated_at = now
-            platform.save(update_fields=[
-                "status", "validated_by", "validated_at", "updated_by", "updated_at",
-            ])
-            changed_platform_ids.add(platform.pk)
+    changed_platform_ids = set()
+    for platform in models.Platform.all_objects.select_for_update().filter(pk__in=ids):
+        for data_field, through_model, relation_field, _ in SECTION_SPECS:
+            if _sync_origin(
+                platform=platform,
+                desired_ids=desired_by_section[data_field].get(platform.pk, set()),
+                through_model=through_model,
+                relation_field=relation_field,
+                origin="is_derived",
+                user=user,
+            ):
+                changed_platform_ids.add(platform.pk)
+
+        if platform.status == models.Platform.Status.PUBLICADO:
+            from .services import validate_platform_for_publication
+            try:
+                validate_platform_for_publication(platform, require_draft=False)
+            except ValidationError:
+                now = timezone.now()
+                platform.status = models.Platform.Status.BORRADOR
+                platform.validated_by = None
+                platform.validated_at = None
+                platform.updated_by = user
+                platform.updated_at = now
+                platform.save(update_fields=[
+                    "status", "validated_by", "validated_at", "updated_by", "updated_at",
+                ])
+                changed_platform_ids.add(platform.pk)
     return changed_platform_ids
