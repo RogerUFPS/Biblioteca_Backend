@@ -1016,7 +1016,7 @@ def process_harvest_worker_step(
     """Process one provider record, committing the journal and checkpoint atomically."""
     with transaction.atomic():
         harvest = (
-            models.Harvest.objects.select_for_update()
+            models.Harvest.objects.select_for_update(of=("self",))
             .select_related("platform", "created_by", "event")
             .get(pk=harvest_id)
         )
