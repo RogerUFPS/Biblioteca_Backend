@@ -2,13 +2,11 @@ import logging
 import time
 import calendar
 import re
-import secrets
 import xml.etree.ElementTree as ElementTree
 from datetime import timedelta
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -28,7 +26,7 @@ ISSN_PATTERN = re.compile(r"^\s*(\d{4})-?(\d{3}[\dXx])\s*$")
 
 
 class RetryableHarvestError(RuntimeError):
-    """A provider or network error that should be retried by the queue."""
+    """A provider or network error that should be retried by Celery."""
 
 
 def get_latest_cursor_for_platform(platform: Platform) -> str:
@@ -1166,7 +1164,7 @@ def _next_occurrence(schedule: models.Schedule):
 
 
 def run_scheduled_harvests(now=None) -> list[models.Harvest]:
-    """Create due Harvests and dispatch bounded work to the Cloudflare producer."""
+    """Create due Harvests and dispatch bounded work to Celery."""
     now = now or timezone.now()
     retry_before = now - timedelta(minutes=5)
     schedule_ids = models.Schedule.objects.filter(
@@ -1260,30 +1258,11 @@ def run_scheduled_harvests(now=None) -> list[models.Harvest]:
 
 
 def dispatch_harvest_to_worker(harvest: models.Harvest) -> models.Harvest:
-    producer_url = getattr(settings, "HARVESTING_WORKER_PRODUCER_URL", "")
-    worker_token = getattr(settings, "HARVESTING_WORKER_TOKEN", "")
-    if not producer_url or not worker_token:
-        raise RuntimeError(
-            "Configura HARVESTING_WORKER_PRODUCER_URL y HARVESTING_WORKER_TOKEN "
-            "para despachar las cosechas."
-        )
-    parsed_producer_url = urlsplit(producer_url)
-    if parsed_producer_url.scheme != "https" or not parsed_producer_url.netloc:
-        raise RuntimeError("HARVESTING_WORKER_PRODUCER_URL debe ser una URL HTTPS válida.")
-    response = httpx.post(
-        producer_url,
-        json={
-            "harvest_id": harvest.pk,
-            "checkpoint": harvest.worker_checkpoint,
-        },
-        headers={"Authorization": f"Bearer {worker_token}"},
-        timeout=10.0,
+    from .tasks import process_harvest_step
+
+    process_harvest_step.apply_async(
+        args=(harvest.pk, harvest.worker_checkpoint),
     )
-    if response.status_code < 200 or response.status_code >= 300:
-        raise RuntimeError(
-            f"El productor de Cloudflare rechazó Harvest #{harvest.pk} "
-            f"(HTTP {response.status_code})."
-        )
     harvest.worker_dispatched_at = timezone.now()
     harvest.save(update_fields=["worker_dispatched_at"])
     return harvest

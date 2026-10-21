@@ -142,18 +142,5 @@ class HarvestSerializer(serializers.ModelSerializer):
         return None
 
 
-class HarvestWorkerStepSerializer(serializers.Serializer):
-    harvest_id = serializers.IntegerField(min_value=1)
-    checkpoint = serializers.IntegerField(min_value=0)
-
-
-class HarvestWorkerStepResultSerializer(serializers.Serializer):
-    harvest_id = serializers.IntegerField()
-    checkpoint = serializers.IntegerField()
-    state = serializers.CharField()
-    has_more = serializers.BooleanField()
-    stale = serializers.BooleanField()
-
-
-class HarvestWorkerErrorSerializer(serializers.Serializer):
+class HarvestQueueErrorSerializer(serializers.Serializer):
     detail = serializers.CharField()

@@ -1,5 +1,4 @@
 from django.utils import timezone
-from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 from unittest.mock import patch
@@ -97,36 +96,6 @@ class HarvestingViewsTestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, [])
         run_scheduled.assert_called_once_with()
-
-    @override_settings(HARVESTING_WORKER_TOKEN="worker-secret")
-    @patch(
-        "apps.harvesting.views.services.process_harvest_worker_step",
-        return_value={
-            "harvest_id": 17,
-            "checkpoint": 1,
-            "state": Harvest.State.RUNNING,
-            "has_more": True,
-            "stale": False,
-        },
-    )
-    def test_worker_step_requires_shared_secret(self, process_step):
-        response = self.client.post(
-            "/api/harvesting/worker/step/",
-            {"harvest_id": 17, "checkpoint": 0},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-        process_step.assert_not_called()
-
-        response = self.client.post(
-            "/api/harvesting/worker/step/",
-            {"harvest_id": 17, "checkpoint": 0},
-            format="json",
-            HTTP_AUTHORIZATION="Bearer worker-secret",
-        )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["checkpoint"], 1)
-        process_step.assert_called_once_with(harvest_id=17, checkpoint=0)
 
     def test_harvest_and_event_endpoints_are_read_only(self):
         schedule = Schedule.objects.create(

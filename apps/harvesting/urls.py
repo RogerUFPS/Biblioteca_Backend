@@ -23,6 +23,5 @@ router.register(
 )
 
 urlpatterns = [
-    path("worker/step/", views.harvest_worker_step, name="harvest-worker-step"),
     *router.urls,
 ]

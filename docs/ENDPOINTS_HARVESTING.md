@@ -31,7 +31,7 @@ los campos de ordenamiento disponibles.
 | `DELETE` | `/{id}/` | Normalmente ninguno. Si hay registros dependientes, enviar `delete_explanation`. | `204` si se elimina físicamente; `200` si se archiva lógicamente. |
 | `GET` | `/archived/` | Ninguno. Acepta filtros y paginación. | `200`: lista paginada de programaciones archivadas. |
 | `POST` | `/{id}/restore/` | Ninguno. | `200`: programación restaurada; `404` si no existe archivada. |
-| `POST` | `/run-due/` | Ninguno. | `202`: cosechas encoladas; `200`: no había trabajo pendiente; `503`: productor no disponible/configurado. |
+| `POST` | `/run-due/` | Ninguno. | `202`: cosechas encoladas; `200`: no había trabajo pendiente; `503`: no se pudo encolar el trabajo. |
 
 ### Crear o actualizar un Schedule
 
@@ -106,7 +106,7 @@ hay dependencias, no se requiere body y el registro se elimina físicamente.
 ### Ejecutar programaciones vencidas (`run-due`)
 
 `POST /schedules/run-due/` evalúa las programaciones vencidas y encola los
-Harvest correspondientes mediante el Worker productor de Cloudflare. No
+Harvest correspondientes en la cola Celery de RabbitMQ. No
 requiere body ni parámetros. Es idempotente por ocurrencia del Schedule:
 llamadas repetidas no crean eventos ni Harvest duplicados. Los Harvest
 pendientes o sin progreso reciente se vuelven a despachar usando el checkpoint
@@ -199,75 +199,24 @@ Reanudar solo es posible desde `paused`, encola el trabajo y continúa desde el
 cursor/checkpoint guardado. El límite de tiempo acumula el tiempo activo de
 procesamiento, excluyendo el tiempo de espera entre mensajes.
 
-## Workers de Cloudflare
+## Procesamiento con Celery y RabbitMQ
 
-El endpoint interno `POST /worker/step/` es exclusivo para el consumidor y
-requiere `Authorization: Bearer <HARVESTING_WORKER_TOKEN>`. Recibe:
+El backend procesa cada Harvest mediante tareas Celery en la cola `harvesting`
+de RabbitMQ. Cada tarea procesa como máximo un registro, guarda el resultado y
+el checkpoint en la misma transacción y encola el siguiente checkpoint cuando
+queda trabajo. Los mensajes duplicados o con checkpoint antiguo no vuelven a
+procesar registros. Los errores transitorios de red se reintentan con espera
+exponencial; el despachador de programaciones recupera tareas que no avanzan.
 
-```json
-{
-  "harvest_id": 123,
-  "checkpoint": 7
-}
-```
-
-Procesa como máximo un registro de proveedor, guarda conjuntamente el resultado
-y el siguiente checkpoint, y responde con `harvest_id`, `checkpoint`, `state`,
-`has_more` y `stale`. Un checkpoint obsoleto no vuelve a procesar el registro.
-El consumidor vuelve a encolar el trabajo con el checkpoint devuelto mientras
-`has_more` sea `true`.
-
-La implementación desplegable está en `cloudflare/harvesting-producer` y
-`cloudflare/harvesting-consumer`. El productor recibe peticiones autenticadas
-del backend y envía mensajes pequeños (`harvest_id`, `checkpoint`) a la cola
-`ufps-harvesting`; no transporta páginas XML. El consumidor de esa cola llama
-al endpoint interno y reencola el siguiente paso. Las colas se configuran con
-lote de un mensaje, cinco reintentos y una dead-letter queue. Cada ejecución
-del consumidor solicita al backend procesar como máximo un registro. El Worker
-no parsea XML ni realiza operaciones de base de datos; su CPU queda limitada a
-validar/enrutar el mensaje y esperar las llamadas de red. El límite gratuito de
-Cloudflare es CPU por invocación (no tiempo de espera de red).
-
-Configuración requerida en el backend:
-
-```dotenv
-HARVESTING_WORKER_PRODUCER_URL=https://<producer>.workers.dev/
-HARVESTING_WORKER_TOKEN=<secreto-compartido>
-```
-
-Antes de habilitar el cron, aplica las migraciones de Harvesting en el backend:
-`python manage.py migrate`.
-
-Configura el mismo secreto en los dos Workers con
-`wrangler secret put HARVEST_WORKER_TOKEN`. En el consumidor configura
-`BACKEND_BASE_URL` como variable de entorno (origen del backend, sin ruta API).
-Actualiza el valor de ejemplo de `BACKEND_BASE_URL` en
-`cloudflare/harvesting-consumer/wrangler.toml` antes de desplegar.
-
-Desde una carpeta con Wrangler autenticado, crea las colas:
+Desde la carpeta principal del proyecto, configura las variables de RabbitMQ
+`RABBITMQ_DEFAULT_USER` y `RABBITMQ_DEFAULT_PASS` en el entorno y ejecuta:
 
 ```sh
-npx wrangler queues create ufps-harvesting
-npx wrangler queues create ufps-harvesting-dead-letter
+docker compose up --build
 ```
 
-Despliega cada Worker desde su carpeta, guardando el mismo secreto en ambos:
-
-```sh
-cd cloudflare/harvesting-producer
-npx wrangler secret put HARVEST_WORKER_TOKEN
-npx wrangler deploy
-
-cd ../harvesting-consumer
-npx wrangler secret put HARVEST_WORKER_TOKEN
-npx wrangler deploy
-```
-
-Después configura `HARVESTING_WORKER_PRODUCER_URL` en el backend con la URL
-`workers.dev` del productor y reinicia el backend. El productor debe estar
-desplegado antes de configurar esa URL.
-
-El checkpoint se valida y persiste en una transacción de base de datos con la
-creación/actualización de la revista. Esto permite reintentos seguros si Queue
-entrega mensajes duplicados. El cron puede repetir `/run-due/`: la ocurrencia
-del Schedule no se duplica, y los mensajes de progreso antiguo son ignorados.
+Compose inicia el backend, el worker Celery, RabbitMQ y el Cron_Service. El
+cron llama automáticamente a `/api/harvesting/schedules/run-due/` cada minuto.
+El backend conserva su configuración de base de datos y demás variables en
+`Backend_Service/.env`. Para aplicar cambios de esquema, ejecuta dentro del
+contenedor del backend `python manage.py migrate`.

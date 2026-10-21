@@ -40,8 +40,20 @@ DEFAULT_FROM_EMAIL = os.getenv(
     os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev"),
 )
 RESEND_FROM_EMAIL = DEFAULT_FROM_EMAIL
-HARVESTING_WORKER_PRODUCER_URL = os.getenv("HARVESTING_WORKER_PRODUCER_URL", "")
-HARVESTING_WORKER_TOKEN = os.getenv("HARVESTING_WORKER_TOKEN", "")
+CELERY_BROKER_URL = os.getenv(
+    "CELERY_BROKER_URL",
+    "amqp://harvest:harvest@rabbitmq:5672//",
+)
+CELERY_TASK_DEFAULT_QUEUE = "harvesting"
+CELERY_TASK_ROUTES = {
+    "apps.harvesting.process_harvest_step": {"queue": "harvesting"},
+}
+CELERY_TASK_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 FRONTEND_LOGIN_URL = os.getenv(
     "FRONTEND_LOGIN_URL",
     "https://repositorio-biblioteca-frontend.vercel.app/admin/login",

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 import httpx
 
@@ -592,10 +592,6 @@ class HarvestingServicesTestCase(TestCase):
         self.assertIsNotNone(harvest.started_at)
         self.assertIsNotNone(harvest.finished_at)
 
-    @override_settings(
-        HARVESTING_WORKER_PRODUCER_URL="https://producer.test",
-        HARVESTING_WORKER_TOKEN="test-token",
-    )
     @patch("apps.harvesting.services.dispatch_harvest_to_worker")
     def test_scheduled_event_creates_and_dispatches_one_harvest_per_platform(
         self,
@@ -637,10 +633,6 @@ class HarvestingServicesTestCase(TestCase):
         self.assertEqual(schedule.events.count(), 2)
         self.assertEqual(dispatch_harvest.call_count, 4)
 
-    @override_settings(
-        HARVESTING_WORKER_PRODUCER_URL="https://producer.test",
-        HARVESTING_WORKER_TOKEN="test-token",
-    )
     @patch("apps.harvesting.services.dispatch_harvest_to_worker")
     def test_scheduled_harvest_fails_if_platform_was_disabled(self, dispatch_harvest):
         self.platform.is_harvestable = False
@@ -663,10 +655,6 @@ class HarvestingServicesTestCase(TestCase):
         dispatch_harvest.assert_not_called()
         self.assertEqual(schedule.events.get().state, ScheduleEvent.State.FAILED)
 
-    @override_settings(
-        HARVESTING_WORKER_PRODUCER_URL="https://producer.test",
-        HARVESTING_WORKER_TOKEN="test-token",
-    )
     @patch("apps.harvesting.services.dispatch_harvest_to_worker")
     def test_repeated_scheduler_call_does_not_create_duplicate_event_or_harvest(
         self,

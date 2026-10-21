@@ -1,7 +1,5 @@
 import logging
-import secrets
 
-from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -9,8 +7,6 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, inline_seri
 from rest_framework import serializers as drf_serializers
 from rest_framework.decorators import (
     action,
-    api_view,
-    authentication_classes,
     permission_classes,
 )
 from rest_framework.permissions import AllowAny
@@ -90,7 +86,7 @@ class ScheduleViewSet(AuditableViewSet):
         responses={
             200: serializers.HarvestSerializer(many=True),
             202: serializers.HarvestSerializer(many=True),
-            503: serializers.HarvestWorkerErrorSerializer,
+            503: serializers.HarvestQueueErrorSerializer,
         },
         tags=["Cosecha - Programaciones"],
     )
@@ -201,8 +197,8 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
         request=None,
         responses={
             202: serializers.HarvestSerializer,
-            400: serializers.HarvestWorkerErrorSerializer,
-            503: serializers.HarvestWorkerErrorSerializer,
+            400: serializers.HarvestQueueErrorSerializer,
+            503: serializers.HarvestQueueErrorSerializer,
         },
         tags=["Cosecha - Ejecuciones"],
     )
@@ -252,39 +248,3 @@ class HarvestViewSet(viewsets.ReadOnlyModelViewSet):
             serializers.HarvestSerializer(harvest).data,
             status=status.HTTP_202_ACCEPTED,
         )
-
-
-@extend_schema(
-    summary="Procesar un paso de cosecha (worker interno)",
-    request=serializers.HarvestWorkerStepSerializer,
-    responses={
-        200: serializers.HarvestWorkerStepResultSerializer,
-        401: serializers.HarvestWorkerErrorSerializer,
-        503: serializers.HarvestWorkerErrorSerializer,
-    },
-    tags=["Cosecha - Workers"],
-)
-@api_view(["POST"])
-@authentication_classes([])
-@permission_classes([AllowAny])
-def harvest_worker_step(request):
-    worker_token = getattr(settings, "HARVESTING_WORKER_TOKEN", "")
-    if not worker_token:
-        return Response(
-            {"detail": "El acceso de workers no está configurado."},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    supplied_token = request.headers.get("Authorization", "")
-    expected_token = f"Bearer {worker_token}"
-    if not secrets.compare_digest(supplied_token, expected_token):
-        return Response(
-            {"detail": "Credenciales de worker inválidas."},
-            status=status.HTTP_401_UNAUTHORIZED,
-        )
-
-    request_serializer = serializers.HarvestWorkerStepSerializer(data=request.data)
-    request_serializer.is_valid(raise_exception=True)
-    result = services.process_harvest_worker_step(
-        **request_serializer.validated_data,
-    )
-    return Response(result)
